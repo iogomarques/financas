@@ -273,34 +273,33 @@ function renderGeral(main) {
       ${kpi('Último saldo informado', st.ultimoSaldo)}
     </section>
 
-    <section class="card grafico">
-      <h2>Receita × despesas por mês</h2>
-      <div class="canvas-box"><canvas id="g-geral"></canvas></div>
-    </section>
-
-    <section class="paineis">
-      ${painel('Médias por mês', [
-        ['Receita', st.mediaReceita],
-        ['Despesas', st.mediaDespesas],
-        ['Débito', st.mediaDebito],
-        ['Crédito (todos os cartões)', st.mediaCredito],
-        ['Investimento', st.mediaInvestimento],
-      ])}
-      ${painel('Crédito', [
-        ['Total gasto no crédito', st.creditoTotal],
-        ...creditos.map((p) => [`Média ${p.cat.nome}`, p.media]),
-      ])}
-      ${painel('Investimentos', [
+    <section class="planilha info-esq">
+    ${blocoInfo('Informações gerais (todos os anos)', [
+      ['', [
+        ['Gasto total', st.gastoTotal],
+        ['Gasto crédito total', st.creditoTotal],
+        ['Receita total', st.receitaTotal],
+        ['Saldo total', st.saldoTotal, true],
+        ['Média de receita por mês', st.mediaReceita],
+        ['Média de despesas por mês', st.mediaDespesas],
+        ['Média de gasto no débito', st.mediaDebito],
+      ]],
+      ['Informações crédito', [
+        ...creditos.map((p) => [`Média de gasto ${p.cat.nome}`, p.media]),
+        ['Média de gasto no crédito', st.mediaCredito],
+      ]],
+      ['Informações investimentos', [
         ['Total investido', st.totalInvestido],
+        ['Média de investimento por mês', st.mediaInvestimento],
         ['Total de rendimento', st.totalRendimento],
-      ])}
-      ${painel('Saldo financeiro (invest. + débito)', [
+      ]],
+      ['Saldo financeiro (invest. + débito)', [
         ['Último saldo informado', st.ultimoSaldo],
-        ['Resultado acumulado', st.resultadoAcumulado, true],
+        ['Resultado acumulado (todos)', st.resultadoAcumulado, true],
         ['Meses com saldo negativo', st.mesesNegativos, false, 'int'],
-      ])}
-    </section>
-
+      ]],
+    ])}
+    <div class="coluna">
     <section class="card">
       <h2>Por ano</h2>
       <div class="tabela-wrap">
@@ -328,6 +327,12 @@ function renderGeral(main) {
           </tr></tfoot>
         </table>
       </div>
+    </section>
+    <section class="card grafico">
+      <h2>Receita × despesas por mês</h2>
+      <div class="canvas-box"><canvas id="g-geral"></canvas></div>
+    </section>
+    </div>
     </section>`;
 
   main.querySelectorAll('tr[data-ano]').forEach((tr) => tr.addEventListener('click', () => (location.hash = `#/ano/${tr.dataset.ano}`)));
@@ -341,10 +346,15 @@ function kpi(label, v, colorir = false) {
   return `<div class="card kpi"><span>${label}</span><strong class="${colorir ? cls(v) : ''}">${fmtBRL(v)}</strong></div>`;
 }
 
-function painel(titulo, linhas) {
-  return `<div class="card painel"><h2>${titulo}</h2><dl>
-    ${linhas.map(([k, v, colorir, tipo]) => `<div><dt>${esc(k)}</dt><dd class="${colorir ? cls(v) : ''}">${tipo === 'int' ? v : fmtBRL(v)}</dd></div>`).join('')}
-  </dl></div>`;
+/** Bloco único com todas as informações, como a coluna de resumo da planilha. */
+function blocoInfo(titulo, secoes) {
+  return `<aside class="card info">
+    <h2>${esc(titulo)}</h2>
+    ${secoes.filter(([, linhas]) => linhas.length).map(([sub, linhas]) => `
+      ${sub ? `<h3>${esc(sub)}</h3>` : ''}
+      <dl>${linhas.map(([k, v, colorir, tipo]) => `<div><dt>${esc(k)}</dt><dd class="${colorir ? cls(v) : ''}">${tipo === 'int' ? v : fmtBRL(v)}</dd></div>`).join('')}</dl>
+    `).join('')}
+  </aside>`;
 }
 
 /* ================================================================ ano */
@@ -372,6 +382,16 @@ function renderAno(main, ano) {
       <p class="sub">${st.mesesComDados ? `${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês lançado' : 'meses lançados'} · toque num mês para editar` : 'Nenhum mês lançado neste ano · toque num mês para lançar'}</p>
     </div>
 
+    ${st.mesesComDados ? `
+    <section class="kpis">
+      ${kpi(`Receita ${ano}`, st.receitaTotal)}
+      ${kpi(`Gasto ${ano}`, st.gastoTotal)}
+      ${kpi('Saldo do ano (receita − despesas)', st.saldoTotal, true)}
+      ${kpi('Último saldo informado', st.ultimoSaldo)}
+    </section>` : ''}
+
+    <section class="planilha ${st.mesesComDados ? 'info-dir' : ''}">
+    <div class="coluna">
     <section class="card">
       <div class="tabela-wrap">
         <table class="tabela ano">
@@ -410,40 +430,42 @@ function renderAno(main, ano) {
     <section class="card grafico">
       <h2>Receita × despesas em ${ano}</h2>
       <div class="canvas-box"><canvas id="g-ano"></canvas></div>
-    </section>
+    </section>` : ''}
+    </div>
 
-    <section class="paineis">
-      ${painel('Informações gerais', [
+    ${st.mesesComDados ? blocoInfo(`Informações gerais ${ano}`, [
+      ['', [
         ['Gasto total', st.gastoTotal],
         ['Receita total', st.receitaTotal],
         ['Saldo total', st.saldoTotal, true],
         ['Média de receita por mês', st.mediaReceita],
         ['Média de despesas por mês', st.mediaDespesas],
-        ['Média de gasto no débito', st.mediaDebito],
         ['Média de gasto no crédito', st.mediaCredito],
-      ])}
-      ${painel('Informações crédito', [
-        ...st.porCategoria.filter((p) => p.cat.tipo === 'credito' && p.meses).map((p) => [`Média ${p.cat.nome}`, p.media]),
+        ['Média de gasto no débito', st.mediaDebito],
+      ]],
+      ['Informações crédito', [
+        ...st.porCategoria.filter((p) => p.cat.tipo === 'credito' && p.meses).map((p) => [`Média de gasto ${p.cat.nome}`, p.media]),
         ['Total gasto no crédito', st.creditoTotal],
-      ])}
-      ${painel('Investimentos', [
+      ]],
+      ['Informações investimentos', [
         ['Total investido', st.totalInvestido],
         ['Média de investimento por mês', st.mediaInvestimento],
         ['Total de rendimento', st.totalRendimento],
-      ])}
-      ${painel('Organização finanças', [
+      ]],
+      ['Organização finanças', [
         [`Dinheiro esperado investir (${fmtPct(S.data.prefs.pct_investir)})`, st.investirEsperado],
         [`Reserva esperada (${S.data.prefs.meses_reserva}× receita)`, st.reservaEsperada],
         [`Dinheiro máximo para gastar (${fmtPct(S.data.prefs.pct_max_gasto)})`, st.maximoGastar],
-      ])}
-      ${painel('Saldo financeiro (invest. + débito)', [
+      ]],
+      ['Saldo financeiro (invest. + débito)', [
         ['Saldo no início do ano', st.saldoInicio],
         ['Último saldo informado', st.ultimoSaldo],
         ['Resultado acumulado no ano', st.resultadoAcumulado, true],
         ['Média do resultado por mês', st.mediaResultado, true],
         ['Meses com saldo negativo', st.mesesNegativos, false, 'int'],
-      ])}
-    </section>` : ''}`;
+      ]],
+    ]) : ''}
+    </section>`;
 
   main.querySelector('select').addEventListener('change', (e) => (location.hash = `#/ano/${e.target.value}`));
   main.querySelectorAll('tr[data-mes]').forEach((tr) => {

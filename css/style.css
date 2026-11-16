@@ -109,7 +109,7 @@ h2 { font-size: 1rem; margin: 0 0 .75rem; }
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .aviso { background: #2b2510; color: #e9d48e; border-color: #3e351a; } }
 
-main { max-width: 1280px; margin: 0 auto; padding: 1.25rem 16px 2rem; display: grid; gap: 1rem; }
+main { max-width: 1720px; margin: 0 auto; padding: 1.25rem 16px 2rem; display: grid; gap: 1rem; }
 .titulo { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 
 .card {
@@ -130,11 +130,31 @@ main { max-width: 1280px; margin: 0 auto; padding: 1.25rem 16px 2rem; display: g
 
 .grafico .canvas-box { position: relative; height: 280px; }
 
+/* ---------- layout "planilha": tabela + coluna de informações lado a lado */
+.planilha { display: grid; gap: 1rem; align-items: start; }
+.planilha.info-dir { grid-template-columns: minmax(0, 1fr) 320px; }
+.planilha.info-esq { grid-template-columns: 320px minmax(0, 1fr); }
+.planilha .coluna { display: grid; gap: 1rem; min-width: 0; }
+.info { position: sticky; top: 76px; padding: .9rem 1rem; }
+.info h2 { font-size: .95rem; text-transform: uppercase; letter-spacing: .03em; margin-bottom: .4rem; }
+.info h3 {
+  font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent);
+  margin: .9rem 0 .2rem; padding-top: .6rem; border-top: 1px solid var(--border);
+}
+.info dl { margin: 0; }
+.info dl div { display: flex; justify-content: space-between; gap: .75rem; padding: .28rem 0; font-size: .88rem; }
+.info dt { color: var(--muted); }
+.info dd { margin: 0; font-weight: 650; white-space: nowrap; text-align: right; }
+@media (max-width: 1100px) {
+  .planilha.info-dir, .planilha.info-esq { grid-template-columns: minmax(0, 1fr); }
+  .info { position: static; }
+}
+
 /* ---------- tabelas */
 .tabela-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -1rem; padding: 0 1rem; }
 .tabela { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .9rem; }
-.tabela th, .tabela td { padding: .55rem .7rem; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
-.tabela thead th { font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; vertical-align: bottom; white-space: normal; min-width: 92px; }
+.tabela th, .tabela td { padding: .5rem .55rem; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+.tabela thead th { font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); font-weight: 700; vertical-align: bottom; white-space: normal; min-width: 80px; }
 .tabela th:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; min-width: 96px; }
 .tabela tbody th { font-weight: 600; }
 .tabela tfoot th, .tabela tfoot td { font-weight: 700; border-bottom: 0; border-top: 2px solid var(--border); }
