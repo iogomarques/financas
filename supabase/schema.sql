@@ -113,3 +113,43 @@ create policy "fin preferencias do dono" on public.fin_preferencias for all to a
   with check ((select auth.uid()) = user_id and exists (select 1 from public.fin_usuarios u where u.user_id = (select auth.uid())));
 
 revoke all on public.fin_categorias, public.fin_meses, public.fin_preferencias, public.fin_usuarios from anon;
+
+-- ===================================================================
+-- Perfis internos e convites por e-mail (aplicado em 16/11/2026)
+-- Cada login tem um perfil (criado automaticamente pelo site); pessoal e empresa
+-- ficam juntos no mesmo perfil, separados por categoria.
+-- Convites: e-mail em fin_convites entra liberado ao criar a conta.
+--   insert into public.fin_convites (email) values ('pessoa@exemplo.com');
+-- ===================================================================
+create table if not exists public.fin_convites (
+  email     text primary key check (email = lower(email)),
+  criado_em timestamptz not null default now()
+);
+alter table public.fin_convites enable row level security;
+create policy "fin convite proprio" on public.fin_convites for select to authenticated
+  using (email = lower(coalesce((select auth.jwt()) ->> 'email', '')));
+revoke all on public.fin_convites from anon;
+revoke insert, update, delete on public.fin_convites from authenticated;
+
+create or replace function public.fin_acesso() returns boolean
+language sql stable set search_path = '' as $$
+  select exists (select 1 from public.fin_usuarios u where u.user_id = (select auth.uid()))
+      or exists (select 1 from public.fin_convites c where c.email = lower(coalesce((select auth.jwt()) ->> 'email', '')));
+$$;
+revoke execute on function public.fin_acesso() from public, anon;
+grant execute on function public.fin_acesso() to authenticated;
+
+create table if not exists public.fin_perfis (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete restrict,
+  nome       text not null check (char_length(nome) between 1 and 40),
+  tipo       text not null default 'pessoal' check (tipo in ('pessoal', 'empresa')),
+  cor        text not null default '#0f766e' check (cor ~ '^#[0-9a-fA-F]{6}$'),
+  ordem      int  not null default 0,
+  created_at timestamptz not null default now(),
+  unique (id, user_id)
+);
+-- fin_categorias, fin_meses e fin_preferencias ganharam perfil_id (not null),
+-- FK (perfil_id, user_id) -> fin_perfis on delete cascade, e chaves:
+--   fin_meses: (user_id, perfil_id, ano, mes) · fin_preferencias: (user_id, perfil_id)
+-- Todas as policies fin_* passaram a usar: (select auth.uid()) = user_id and (select public.fin_acesso())

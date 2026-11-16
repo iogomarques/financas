@@ -1,13 +1,14 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261116133133';
-import { MESES, MESES_CURTO, indexMeses, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js?v=20261116133133';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261116133133';
-import { lerPlanilha } from './importer.js?v=20261116133133';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261116134441';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js?v=20261116134441';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261116134441';
+import { lerPlanilha } from './importer.js?v=20261116134441';
 
 const app = document.getElementById('app');
 const S = {
   store: null,
   user: null,
-  data: { categorias: [], meses: [], prefs: { ...PREFS_PADRAO } },
+  data: dadosVazios(),
+  perfilId: null,
   charts: [],
 };
 
@@ -25,11 +26,31 @@ const money = (v) => `<span class="${cls(v)}">${fmtBRL(v)}</span>`;
 const cats = () => [...S.data.categorias].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) || a.nome.localeCompare(b.nome));
 const anoAtual = () => new Date().getFullYear();
 
+function dadosVazios() {
+  return { perfis: [], categorias: [], meses: [], prefs: {} };
+}
+/** Percentuais de "Organização finanças" do perfil do usuário. */
+function prefs() {
+  return { ...PREFS_PADRAO, ...(S.data.prefs[S.perfilId] || {}) };
+}
+
+/** Mês mostrado por padrão: o último lançado (até o mês atual) ou o mês atual. */
+function mesPadrao() {
+  const hoje = new Date();
+  const limite = hoje.getFullYear() * 100 + hoje.getMonth() + 1;
+  const ult = S.data.meses.filter(mesTemDados).map((m) => m.ano * 100 + m.mes).filter((n) => n <= limite).sort((a, b) => b - a)[0];
+  const n = ult || limite;
+  return { ano: Math.floor(n / 100), mes: n % 100 };
+}
+
 function rota() {
   const h = location.hash.replace(/^#\/?/, '').split('/');
   if (h[0] === 'ano') return { view: 'ano', ano: Number(h[1]) || anoAtual() };
   if (h[0] === 'ajustes') return { view: 'ajustes' };
-  return { view: 'geral' };
+  if (h[0] === 'geral') return { view: 'geral' };
+  const ano = Number(h[1]), mes = Number(h[2]);
+  if (h[0] === 'mes' && ano && mes >= 1 && mes <= 12) return { view: 'mes', ano, mes };
+  return { view: 'mes', ...mesPadrao() };
 }
 
 function destroyCharts() {
@@ -95,8 +116,11 @@ async function boot() {
 async function carregar() {
   try {
     S.autorizado = await S.store.autorizado();
-    if (!S.autorizado) { S.data = { categorias: [], meses: [], prefs: { ...PREFS_PADRAO } }; return; }
+    if (!S.autorizado) { S.data = dadosVazios(); return; }
     S.data = await S.store.load();
+    // Cada login tem um perfil interno (o banco suporta mais de um, a tela não mostra).
+    if (!S.data.perfis.length) S.data.perfis.push(await S.store.savePerfil({ nome: 'Pessoal', tipo: 'pessoal', ordem: 1 }));
+    S.perfilId = S.data.perfis[0].id;
   } catch (e) {
     toast('Erro ao carregar dados: ' + e.message, 'erro');
   }
@@ -110,7 +134,8 @@ function render() {
   const r = rota();
   app.innerHTML = shell(r);
   const main = app.querySelector('main');
-  if (r.view === 'geral') renderGeral(main);
+  if (r.view === 'mes') renderMes(main, r.ano, r.mes);
+  else if (r.view === 'geral') renderGeral(main);
   else if (r.view === 'ano') renderAno(main, r.ano);
   else renderAjustes(main);
   bindShell();
@@ -118,26 +143,42 @@ function render() {
 
 function shell(r) {
   const item = (href, view, label, icon) =>
-    `<a href="${href}" class="${r.view === view ? 'ativo' : ''}">${icon}<span>${label}</span></a>`;
-  const ano = r.view === 'ano' ? r.ano : anoAtual();
+    `<a href="${href}" class="${r.view === view ? 'ativo' : ''}" ${r.view === view ? 'aria-current="page"' : ''}>${icon}<span>${label}</span></a>`;
+  const ano = r.view === 'ano' || r.view === 'mes' ? r.ano : anoAtual();
+  const email = S.user?.email || '';
+  const marca = '<div class="marca"><img src="icons/icon.svg" alt="" width="30" height="30"><span>Finanças Marques</span></div>';
   return `
-  <header class="topo">
-    <div class="marca"><img src="icons/icon.svg" alt="" width="28" height="28"><span>Finanças Marques</span></div>
-    <nav class="nav">
-      ${item('#/geral', 'geral', 'Visão geral', ICON.geral)}
-      ${item(`#/ano/${ano}`, 'ano', 'Anos', ICON.ano)}
-      ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
-    </nav>
-    <button class="btn primario lancar" data-acao="lancar">${ICON.mais}<span>Lançar mês</span></button>
-  </header>
-  ${S.store.mode === 'local' ? '<div class="aviso">Modo local: os dados ficam só neste navegador. Conecte o Supabase para acessar de qualquer dispositivo.</div>' : ''}
-  <main></main>`;
+  <div class="layout">
+    <aside class="lateral">
+      ${marca}
+      <nav class="nav" aria-label="Menu">
+        <span class="nav-titulo">Menu</span>
+        ${item('#/mes', 'mes', 'Mês', ICON.mes)}
+        ${item('#/geral', 'geral', 'Visão geral', ICON.geral)}
+        ${item(`#/ano/${ano}`, 'ano', 'Anos', ICON.ano)}
+        ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
+      </nav>
+      <div class="lateral-pe">
+        <span class="avatar">${esc((email[0] || '?').toUpperCase())}</span>
+        <div><b>${esc(email.split('@')[0] || 'Conta')}</b><small>${S.store.mode === 'local' ? 'modo local' : esc(email)}</small></div>
+      </div>
+    </aside>
+    <div class="conteudo">
+      <header class="topo">
+        ${marca}
+        <button class="btn primario lancar" data-acao="lancar">${ICON.mais}<span>Lançar mês</span></button>
+      </header>
+      ${S.store.mode === 'local' ? '<div class="aviso">Modo local: os dados ficam só neste navegador.</div>' : ''}
+      <main></main>
+    </div>
+  </div>`;
 }
 
 function bindShell() {
   app.querySelector('[data-acao="lancar"]')?.addEventListener('click', () => {
     const d = new Date();
     const r = rota();
+    if (r.view === 'mes') { abrirEditor(r.ano, r.mes); return; }
     // Sugere o último mês lançado + 1, ou o mês atual
     const ultimos = S.data.meses.filter(mesTemDados).sort((a, b) => b.ano - a.ano || b.mes - a.mes);
     let ano = d.getFullYear(), mes = d.getMonth() + 1;
@@ -234,6 +275,167 @@ function traduzErro(m) {
 }
 
 /* ========================================================== visão geral */
+/* ================================================================ mês */
+// Cores das categorias (mesma ordem das categorias do usuário)
+const PALETA = ['#2a9d8f', '#e76f51', '#457b9d', '#e9a23b', '#8d6cab', '#c05780', '#6a994e', '#5c7c8a'];
+const corCat = (cat) => PALETA[Math.max(0, cats().findIndex((c) => c.id === cat.id)) % PALETA.length];
+const anterior = (ano, mes) => (mes === 1 ? { ano: ano - 1, mes: 12 } : { ano, mes: mes - 1 });
+const seguinte = (ano, mes) => (mes === 12 ? { ano: ano + 1, mes: 1 } : { ano, mes: mes + 1 });
+
+/** "↑ 12% vs out" — menorMelhor: para despesas, subir é ruim (vermelho). */
+function delta(v, ref, rotulo, menorMelhor = false) {
+  if (v === null || v === undefined || ref === null || ref === undefined || ref === 0) return '';
+  const p = (v - ref) / Math.abs(ref);
+  if (Math.abs(p) < 0.005) return `<span class="delta">= ${rotulo}</span>`;
+  const bom = menorMelhor ? p < 0 : p > 0;
+  return `<span class="delta ${bom ? 'pos' : 'neg'}">${p > 0 ? '↑' : '↓'} ${Math.round(Math.abs(p) * 100)}% ${rotulo}</span>`;
+}
+
+function renderMes(main, ano, mes) {
+  const c = cats();
+  const map = indexMeses(S.data.meses);
+  const l = linhaMes(ano, mes, map, c);
+  const pa = anterior(ano, mes), px = seguinte(ano, mes);
+  const ant = linhaMes(pa.ano, pa.mes, map, c);
+  const st = estatisticas(linhasDoAno(ano, map, c), c, prefs());
+  const p = prefs();
+  const vsAnt = `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`;
+
+  const topo = `
+    <div class="mes-topo">
+      <a class="btn icone" href="#/mes/${pa.ano}/${pa.mes}" aria-label="Mês anterior">‹</a>
+      <a class="btn icone" href="#/mes/${px.ano}/${px.mes}" aria-label="Próximo mês">›</a>
+      <h1>${MESES[mes - 1]} <span>${ano}</span></h1>
+      ${l.temDados ? '<button class="btn" data-a="editar">Editar mês</button>' : ''}
+    </div>`;
+
+  if (!l.temDados) {
+    main.innerHTML = `${topo}
+      <section class="card vazio">
+        <h2>${MESES[mes - 1]} de ${ano} ainda não foi lançado</h2>
+        <p>Lance a receita, os gastos no débito e nos cartões, o investimento e o saldo do dia 1º.</p>
+        <div class="acoes"><button class="btn primario" data-a="editar">Lançar ${MESES[mes - 1]}</button></div>
+      </section>`;
+    main.querySelectorAll('[data-a="editar"]').forEach((b) => b.addEventListener('click', () => abrirEditor(ano, mes)));
+    return;
+  }
+
+  // Para onde foi a receita: uma faixa por categoria + a sobra
+  const receita = l.receita ?? 0;
+  const gastos = c.filter((cat) => (l.desp[cat.id] ?? 0) > 0).map((cat) => ({ nome: cat.nome, valor: l.desp[cat.id], cor: corCat(cat) }));
+  const sobra = l.saldoMes ?? 0;
+  const base = Math.max(receita, l.totalDesp ?? 0) || 1;
+  const partes = [...gastos, ...(sobra > 0 ? [{ nome: 'Sobra', valor: sobra, cor: 'var(--pos)' }] : [])];
+  const pctReceita = (v) => (receita > 0 ? ` <small>${Math.round((v / receita) * 100)}%</small>` : '');
+
+  const linhaCat = (cat) => {
+    const v = l.desp[cat.id];
+    const media = st.porCategoria.find((x) => x.cat.id === cat.id)?.media;
+    return `<div class="linha-cat">
+      <span class="dot" style="background:${corCat(cat)}"></span>
+      <div class="nome">${esc(cat.nome)}<small>média ${ano}: ${fmtBRL(media || 0)}</small></div>
+      <div class="val"><strong>${v === null || v === undefined ? '—' : fmtBRL(v)}</strong>${delta(v, ant.desp[cat.id], vsAnt, true)}</div>
+    </div>`;
+  };
+  const doTipo = (tipo) => c.filter((cat) => cat.tipo === tipo && (cat.ativo !== false || l.desp[cat.id] !== null));
+  const creditos = doTipo('credito');
+  const debitos = doTipo('debito');
+
+  const metaInvest = receita * p.pct_investir;
+  const pctMeta = metaInvest > 0 ? Math.min(100, ((l.investimento ?? 0) / metaInvest) * 100) : 0;
+  const prox = seguinte(ano, mes);
+
+  main.innerHTML = `${topo}
+    <div class="mes-grid">
+      <section class="card hero">
+        <div class="hero-cab">
+          <div>
+            <span class="rotulo">Sobra do mês (receita − despesas)</span>
+            <strong class="valor-grande ${cls(sobra)}">${fmtBRL(sobra)}</strong>
+            <p class="sub">${receita > 0
+              ? sobra >= 0 ? `<span class="pos">${Math.round((sobra / receita) * 100)}% da receita</span> ficou com você`
+                : `<span class="neg">gastou ${fmtBRL(-sobra)} além da receita</span>`
+              : 'sem receita lançada'} ${delta(sobra, ant.saldoMes, vsAnt)}</p>
+          </div>
+          <div class="hero-lado">
+            <div><span>Receita</span><strong>${fmtBRL(l.receita)}</strong>${delta(l.receita, ant.receita, vsAnt)}</div>
+            <div><span>Despesas</span><strong>${fmtBRL(l.totalDesp)}</strong>${delta(l.totalDesp, ant.totalDesp, vsAnt, true)}</div>
+          </div>
+        </div>
+        <div class="barra-empilhada" role="img" aria-label="Divisão da receita">
+          ${partes.map((x) => `<span style="width:${(x.valor / base) * 100}%;background:${x.cor}" title="${esc(x.nome)}: ${fmtBRL(x.valor)}"></span>`).join('')}
+        </div>
+        <ul class="legenda">
+          ${partes.map((x) => `<li><span class="dot" style="background:${x.cor}"></span><span>${esc(x.nome)}</span><b>${fmtBRL(x.valor)}${pctReceita(x.valor)}</b></li>`).join('')}
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Saldo financeiro</h2>
+        <dl class="lista">
+          <div><dt>Saldo inicial (1º de ${MESES_CURTO[mes - 1].toLowerCase()})</dt><dd>${fmtBRL(l.saldoIni)}</dd></div>
+          <div><dt>Saldo final (1º de ${MESES_CURTO[prox.mes - 1].toLowerCase()})</dt><dd>${fmtBRL(l.saldoFin)}</dd></div>
+          <div class="destaque"><dt>Resultado do saldo</dt><dd class="${cls(l.resultado)}">${fmtBRL(l.resultado)}</dd></div>
+        </dl>
+        ${l.saldoFin === null ? `<p class="hint">O saldo final aparece quando você lançar o saldo de 1º de ${MESES[prox.mes - 1].toLowerCase()}.</p>` : ''}
+      </section>
+
+      ${creditos.length ? `
+      <section class="card">
+        <h2>Cartões de crédito</h2>
+        ${creditos.map(linhaCat).join('')}
+        <div class="linha-total"><span>Total no crédito</span><strong>${fmtBRL(l.credito)}</strong></div>
+      </section>` : ''}
+
+      ${debitos.length ? `
+      <section class="card">
+        <h2>Débito / conta</h2>
+        ${debitos.map(linhaCat).join('')}
+        <div class="linha-total"><span>Total no débito</span><strong>${fmtBRL(l.debito)}</strong></div>
+      </section>` : ''}
+
+      <section class="card">
+        <h2>Investimento</h2>
+        <dl class="lista">
+          <div><dt>Investido no mês</dt><dd>${fmtBRL(l.investimento)}</dd></div>
+          <div><dt>Meta (${fmtPct(p.pct_investir)} da receita)</dt><dd>${fmtBRL(metaInvest)}</dd></div>
+        </dl>
+        <div class="progresso" role="progressbar" aria-valuenow="${Math.round(pctMeta)}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pctMeta}%"></span></div>
+        <dl class="lista">
+          <div><dt>Rendimento / outras entradas</dt><dd>${fmtBRL(l.rendimento)}</dd></div>
+          <div><dt>Total investido em ${ano}</dt><dd>${fmtBRL(st.totalInvestido)}</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>Comparado à média de ${ano}</h2>
+        <dl class="lista">
+          <div><dt>Receita</dt><dd>${fmtBRL(l.receita)} ${delta(l.receita, st.mediaReceita, 'vs média')}</dd></div>
+          <div><dt>Despesas</dt><dd>${fmtBRL(l.totalDesp)} ${delta(l.totalDesp, st.mediaDespesas, 'vs média', true)}</dd></div>
+          <div><dt>Máximo para gastar (${fmtPct(p.pct_max_gasto)})</dt><dd>${fmtBRL(receita * p.pct_max_gasto)}</dd></div>
+        </dl>
+        ${l.totalDesp !== null && receita > 0 && l.totalDesp > receita * p.pct_max_gasto
+          ? `<p class="hint neg">Despesas acima do máximo de ${fmtPct(p.pct_max_gasto)} da receita.</p>`
+          : receita > 0 ? `<p class="hint pos">Despesas dentro do máximo de ${fmtPct(p.pct_max_gasto)} da receita.</p>` : ''}
+      </section>
+
+      <section class="card grafico largo">
+        <h2>Últimos 6 meses</h2>
+        <div class="canvas-box"><canvas id="g-mes"></canvas></div>
+      </section>
+
+      ${l.rec?.observacao ? `<section class="card largo"><h2>Observação</h2><p>${esc(l.rec.observacao)}</p></section>` : ''}
+    </div>`;
+
+  main.querySelectorAll('[data-a="editar"]').forEach((b) => b.addEventListener('click', () => abrirEditor(ano, mes)));
+  const ult6 = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(ano, mes - 1 - i, 1);
+    ult6.push(linhaMes(d.getFullYear(), d.getMonth() + 1, map, c));
+  }
+  grafico(main.querySelector('#g-mes'), ult6);
+}
+
 /* ---------------------------------------------------------- filtro */
 const FILTRO_KEY = 'financas-filtro-v1';
 const PRESETS = {
@@ -335,7 +537,7 @@ function renderGeral(main) {
     .map((ano) => ({ ano, linhas: linhasDoAno(ano, map, c).filter(dentro) }))
     .filter((a) => a.linhas.some((l) => l.temDados));
   const todas = porAno.flatMap((a) => a.linhas);
-  const st = estatisticas(todas, c, S.data.prefs);
+  const st = estatisticas(todas, c, prefs());
 
   if (!st.mesesComDados && !S.data.meses.some(mesTemDados)) {
     main.innerHTML = `
@@ -416,7 +618,7 @@ function renderGeral(main) {
           </tr></thead>
           <tbody>
             ${porAno.map(({ ano, linhas }) => {
-              const s = estatisticas(linhas, c, S.data.prefs);
+              const s = estatisticas(linhas, c, prefs());
               return `<tr class="clicavel" data-ano="${ano}">
                 <th><a href="#/ano/${ano}">${ano}</a></th>
                 <td>${fmtBRL(s.gastoTotal)}</td><td>${fmtBRL(s.creditoTotal)}</td><td>${fmtBRL(s.receitaTotal)}</td>
@@ -471,7 +673,7 @@ function renderAno(main, ano) {
   const linhas = linhasDoAno(ano, map, c);
   // Mostra categorias ativas + inativas que têm valor neste ano
   const colunas = c.filter((cat) => cat.ativo !== false || linhas.some((l) => l.desp[cat.id] !== null));
-  const st = estatisticas(linhas, c, S.data.prefs);
+  const st = estatisticas(linhas, c, prefs());
   const anos = [...new Set([...anosComDados(S.data.meses), anoAtual(), ano])].sort((a, b) => a - b);
 
   const td = (v, colorir = false, calc = false) =>
@@ -560,9 +762,9 @@ function renderAno(main, ano) {
         ['Total de rendimento', st.totalRendimento],
       ]],
       ['Organização finanças', [
-        [`Dinheiro esperado investir (${fmtPct(S.data.prefs.pct_investir)})`, st.investirEsperado],
-        [`Reserva esperada (${S.data.prefs.meses_reserva}× receita)`, st.reservaEsperada],
-        [`Dinheiro máximo para gastar (${fmtPct(S.data.prefs.pct_max_gasto)})`, st.maximoGastar],
+        [`Dinheiro esperado investir (${fmtPct(prefs().pct_investir)})`, st.investirEsperado],
+        [`Reserva esperada (${prefs().meses_reserva}× receita)`, st.reservaEsperada],
+        [`Dinheiro máximo para gastar (${fmtPct(prefs().pct_max_gasto)})`, st.maximoGastar],
       ]],
       ['Saldo financeiro (invest. + débito)', [
         ['Saldo no início do ano', st.saldoInicio],
@@ -590,7 +792,7 @@ async function garantirCategorias() {
     { nome: 'Débito', tipo: 'debito', ordem: 1, ativo: true },
     { nome: 'Cartão de crédito', tipo: 'credito', ordem: 2, ativo: true },
   ];
-  for (const c of padrao) S.data.categorias.push(await S.store.saveCategoria(c));
+  for (const c of padrao) S.data.categorias.push(await S.store.saveCategoria({ ...c, perfil_id: S.perfilId }));
 }
 
 async function abrirEditor(ano, mes) {
@@ -647,7 +849,7 @@ async function abrirEditor(ano, mes) {
   const fechar = () => { dlg.close(); dlg.remove(); };
 
   function ler() {
-    const out = { ano, mes, despesas: {}, formulas: {}, observacao: form.observacao.value.trim() || null };
+    const out = { perfil_id: S.perfilId, ano, mes, despesas: {}, formulas: {}, observacao: form.observacao.value.trim() || null };
     let erro = null;
     form.querySelectorAll('input[name]').forEach((inp) => {
       const prev = inp.parentElement.querySelector('.calc-preview');
@@ -691,7 +893,7 @@ async function abrirEditor(ano, mes) {
     btn.disabled = true;
     try {
       if (!mesTemDados(out) && !out.observacao) {
-        if (mesTemDados(rec) || rec.observacao) await S.store.deleteMes(ano, mes);
+        if (mesTemDados(rec) || rec.observacao) await S.store.deleteMes(S.perfilId, ano, mes);
         S.data.meses = S.data.meses.filter((m) => !(m.ano === ano && m.mes === mes));
       } else {
         const salvo = await S.store.saveMes(out);
@@ -712,8 +914,9 @@ async function abrirEditor(ano, mes) {
     e.preventDefault();
     if (await salvar()) {
       fechar();
-      if (rota().view !== 'ano' || rota().ano !== ano) location.hash = `#/ano/${ano}`;
-      else render();
+      const r = rota();
+      const destino = r.view === 'mes' ? `#/mes/${ano}/${mes}` : r.view === 'ano' ? `#/ano/${ano}` : location.hash;
+      if (destino !== location.hash) location.hash = destino; else render();
     }
   });
   dlg.querySelector('[data-acao="cancelar"]').addEventListener('click', fechar);
@@ -728,7 +931,7 @@ async function abrirEditor(ano, mes) {
   dlg.querySelector('[data-acao="limpar"]')?.addEventListener('click', async () => {
     if (!confirm(`Apagar todos os valores de ${MESES[mes - 1]} de ${ano}?`)) return;
     try {
-      await S.store.deleteMes(ano, mes);
+      await S.store.deleteMes(S.perfilId, ano, mes);
       S.data.meses = S.data.meses.filter((m) => !(m.ano === ano && m.mes === mes));
       toast('Mês apagado.');
       fechar();
@@ -743,7 +946,7 @@ async function abrirEditor(ano, mes) {
 function renderAjustes(main) {
   const c = cats();
   const usada = (id) => S.data.meses.some((m) => m.despesas && m.despesas[id] !== undefined && m.despesas[id] !== null);
-  const p = S.data.prefs;
+  const p = prefs();
   main.innerHTML = `
     <div class="titulo"><div><h1>Ajustes</h1><p class="sub">${esc(S.user.email || '')}</p></div></div>
 
@@ -848,7 +1051,7 @@ function renderAjustes(main) {
     e.preventDefault();
     const f = e.target;
     try {
-      const nova = await S.store.saveCategoria({ nome: f.nome.value.trim(), tipo: f.tipo.value, ordem: S.data.categorias.length + 1, ativo: true });
+      const nova = await S.store.saveCategoria({ perfil_id: S.perfilId, nome: f.nome.value.trim(), tipo: f.tipo.value, ordem: S.data.categorias.length + 1, ativo: true });
       S.data.categorias.push(nova);
       toast('Categoria adicionada.');
       render();
@@ -863,7 +1066,7 @@ function renderAjustes(main) {
       const v = (n) => parseExpr(f[n].value).value;
       const novo = { pct_investir: v('pct_investir') / 100, meses_reserva: v('meses_reserva'), pct_max_gasto: v('pct_max_gasto') / 100 };
       if (Object.values(novo).some((x) => x === null || Number.isNaN(x))) throw new Error('Preencha os três campos.');
-      S.data.prefs = { ...S.data.prefs, ...(await S.store.savePrefs(novo)) };
+      S.data.prefs[S.perfilId] = await S.store.savePrefs(S.perfilId, novo);
       toast('Preferências salvas.');
     } catch (ex) { toast(ex.message, 'erro'); }
   });
@@ -905,7 +1108,7 @@ function renderAjustes(main) {
 
   // --- backup
   main.querySelector('[data-a="exportar"]').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify({ versao: 1, exportado_em: new Date().toISOString(), ...S.data }, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify({ versao: 2, exportado_em: new Date().toISOString(), ...S.data }, null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = `financas-backup-${new Date().toISOString().slice(0, 10)}.json`;
@@ -930,7 +1133,8 @@ function renderAjustes(main) {
   main.querySelector('[data-a="sair"]')?.addEventListener('click', async () => {
     await S.store.signOut();
     S.user = null;
-    S.data = { categorias: [], meses: [], prefs: { ...PREFS_PADRAO } };
+    S.data = dadosVazios();
+    S.perfilId = null;
     render();
   });
 }
@@ -941,13 +1145,13 @@ async function importar(lido) {
   let ordem = S.data.categorias.length;
   for (const nc of lido.categorias) {
     if (porNome.has(nc.nome.toLowerCase())) continue;
-    const salvo = await S.store.saveCategoria({ ...nc, ordem: ++ordem, ativo: true });
+    const salvo = await S.store.saveCategoria({ ...nc, perfil_id: S.perfilId, ordem: ++ordem, ativo: true });
     S.data.categorias.push(salvo);
     porNome.set(salvo.nome.toLowerCase(), salvo);
   }
   for (const m of lido.meses) {
     const rec = {
-      ano: m.ano, mes: m.mes,
+      perfil_id: S.perfilId, ano: m.ano, mes: m.mes,
       receita: m.receita ?? null, investimento: m.investimento ?? null, rendimento: m.rendimento ?? null, saldo_inicial: m.saldo_inicial ?? null,
       despesas: {}, formulas: { ...m.formulas }, observacao: null,
     };
@@ -967,8 +1171,9 @@ async function importar(lido) {
 /* ============================================================== ícones */
 const svg = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const ICON = {
+  mes: svg('<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M8.5 14.5l2.2 2.2 4.8-4.8"/>'),
   geral: svg('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'),
-  ano: svg('<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/>'),
+  ano: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>'),
   ajustes: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   mais: svg('<path d="M12 5v14M5 12h14"/>'),
 };
