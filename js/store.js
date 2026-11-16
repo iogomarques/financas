@@ -7,7 +7,7 @@
 //     categorias: [{id, perfil_id, nome, tipo: 'debito'|'credito', ordem, ativo}],
 //     meses: [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     prefs: { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261116134441';
+import { uid } from './util.js?v=20261116134933';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 

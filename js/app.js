@@ -1,7 +1,7 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261116134441';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js?v=20261116134441';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261116134441';
-import { lerPlanilha } from './importer.js?v=20261116134441';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261116134933';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js?v=20261116134933';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261116134933';
+import { lerPlanilha } from './importer.js?v=20261116134933';
 
 const app = document.getElementById('app');
 const S = {
@@ -45,8 +45,9 @@ function mesPadrao() {
 
 function rota() {
   const h = location.hash.replace(/^#\/?/, '').split('/');
-  if (h[0] === 'ano') return { view: 'ano', ano: Number(h[1]) || anoAtual() };
+  if (h[0] === 'ano') return { view: 'ano', ano: Number(h[1]) || anoAtual(), aba: h[2] === 'planilha' ? 'planilha' : 'resumo' };
   if (h[0] === 'ajustes') return { view: 'ajustes' };
+  if (h[0] === 'ajuda') return { view: 'ajuda' };
   if (h[0] === 'geral') return { view: 'geral' };
   const ano = Number(h[1]), mes = Number(h[2]);
   if (h[0] === 'mes' && ano && mes >= 1 && mes <= 12) return { view: 'mes', ano, mes };
@@ -136,7 +137,8 @@ function render() {
   const main = app.querySelector('main');
   if (r.view === 'mes') renderMes(main, r.ano, r.mes);
   else if (r.view === 'geral') renderGeral(main);
-  else if (r.view === 'ano') renderAno(main, r.ano);
+  else if (r.view === 'ano') renderAno(main, r.ano, r.aba);
+  else if (r.view === 'ajuda') renderAjuda(main);
   else renderAjustes(main);
   bindShell();
 }
@@ -154,9 +156,11 @@ function shell(r) {
       <nav class="nav" aria-label="Menu">
         <span class="nav-titulo">Menu</span>
         ${item('#/mes', 'mes', 'Mês', ICON.mes)}
-        ${item('#/geral', 'geral', 'Visão geral', ICON.geral)}
-        ${item(`#/ano/${ano}`, 'ano', 'Anos', ICON.ano)}
+        ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano)}
+        ${item('#/geral', 'geral', 'Todos os anos', ICON.geral)}
+        <span class="nav-titulo nav-sep">Configurar</span>
         ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
+        ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda)}
       </nav>
       <div class="lateral-pe">
         <span class="avatar">${esc((email[0] || '?').toUpperCase())}</span>
@@ -307,7 +311,31 @@ function renderMes(main, ano, mes) {
       <a class="btn icone" href="#/mes/${px.ano}/${px.mes}" aria-label="Próximo mês">›</a>
       <h1>${MESES[mes - 1]} <span>${ano}</span></h1>
       ${l.temDados ? '<button class="btn" data-a="editar">Editar mês</button>' : ''}
-    </div>`;
+    </div>
+    <p class="sub descricao">O resumo do mês: quanto sobrou, para onde foi o dinheiro e como foi em relação ao mês anterior.
+      <a href="#/ajuda">Como usar</a></p>`;
+
+  if (!S.data.meses.some(mesTemDados)) {
+    // Conta nova: guia de primeiros passos
+    const temCats = S.data.categorias.length > 0;
+    const passo = (ok, titulo, texto, acao) => `
+      <li class="${ok ? 'feito' : ''}">
+        <span class="check" aria-hidden="true">${ok ? '✓' : ''}</span>
+        <div><b>${titulo}</b><p class="sub">${texto}</p>${acao || ''}</div>
+      </li>`;
+    main.innerHTML = `${topo}
+      <section class="card primeiros">
+        <h2>Primeiros passos</h2>
+        <p class="sub">Três passos para começar. Dúvidas sobre algum termo? Veja a <a href="#/ajuda">Ajuda</a>.</p>
+        <ol class="checklist">
+          ${passo(temCats, 'Cadastrar cartões e categorias', 'Um item para cada cartão de crédito e para os gastos no débito (pessoais e da empresa).', '<a class="btn" href="#/ajustes">Abrir Ajustes</a>')}
+          ${passo(false, 'Trazer o histórico (opcional)', 'Se existir a planilha FINANÇAS GERAIS.xlsx, importe em Ajustes e todos os meses aparecem aqui.', '<a class="btn" href="#/ajustes">Importar planilha</a>')}
+          ${passo(false, `Lançar ${MESES[mes - 1].toLowerCase()} de ${ano}`, 'Receita, débito, fatura de cada cartão, investimento e o saldo do dia 1º.', '<button class="btn primario" data-a="editar">Lançar este mês</button>')}
+        </ol>
+      </section>`;
+    main.querySelectorAll('[data-a="editar"]').forEach((b) => b.addEventListener('click', () => abrirEditor(ano, mes)));
+    return;
+  }
 
   if (!l.temDados) {
     main.innerHTML = `${topo}
@@ -561,7 +589,7 @@ function renderGeral(main) {
     : `${ymTexto(ym(comDados[0]))} a ${ymTexto(ym(comDados[comDados.length - 1]))}`;
   const cabecalho = `
     <div class="titulo">
-      <div><h1>Visão geral</h1><p class="sub">${periodo}${periodo ? ' · ' : ''}${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês lançado' : 'meses lançados'}${f.cats ? ' · despesas filtradas' : ''}</p></div>
+      <div><h1>Todos os anos</h1><p class="sub">A soma de todos os anos lançados. Use o filtro para ver um período ou só alguns cartões. · ${periodo}${periodo ? ' · ' : ''}${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês lançado' : 'meses lançados'}${f.cats ? ' · despesas filtradas' : ''}</p></div>
     </div>
     ${filtroHTML(f, todasCats)}`;
 
@@ -667,14 +695,234 @@ function blocoInfo(titulo, secoes) {
 }
 
 /* ================================================================ ano */
-function renderAno(main, ano) {
+/** Cabeçalho do ano: seletor de ano + abas Resumo / Planilha. */
+function cabecalhoAno(ano, aba, st) {
+  const anos = [...new Set([...anosComDados(S.data.meses), anoAtual(), ano, ano - 1, ano + 1])].sort((a, b) => a - b);
+  const sufixo = aba === 'planilha' ? '/planilha' : '';
+  return `
+    <div class="titulo">
+      <div class="seletor-ano">
+        <a class="btn icone" href="#/ano/${ano - 1}${sufixo}" aria-label="Ano anterior">‹</a>
+        <select aria-label="Ano">${anos.map((a) => `<option ${a === ano ? 'selected' : ''}>${a}</option>`).join('')}</select>
+        <a class="btn icone" href="#/ano/${ano + 1}${sufixo}" aria-label="Próximo ano">›</a>
+      </div>
+      <div class="abas" role="tablist">
+        <a role="tab" href="#/ano/${ano}" class="${aba === 'resumo' ? 'ativo' : ''}" aria-selected="${aba === 'resumo'}">Resumo do ano</a>
+        <a role="tab" href="#/ano/${ano}/planilha" class="${aba === 'planilha' ? 'ativo' : ''}" aria-selected="${aba === 'planilha'}">Planilha (mês a mês)</a>
+      </div>
+    </div>
+    <p class="sub descricao">${aba === 'resumo'
+      ? 'O ano inteiro em um só lugar: quanto entrou, quanto saiu, para onde foi o dinheiro e como o saldo evoluiu.'
+      : 'Igual à aba do ano na planilha: um mês por linha, com as informações gerais ao lado. Toque num mês para lançar ou editar.'}
+      ${st.mesesComDados ? ` · ${st.mesesComDados} de 12 meses lançados` : ''}</p>`;
+}
+
+function bindCabecalhoAno(main, aba) {
+  main.querySelector('.seletor-ano select').addEventListener('change', (e) => {
+    location.hash = `#/ano/${e.target.value}${aba === 'planilha' ? '/planilha' : ''}`;
+  });
+}
+
+function renderAno(main, ano, aba) {
+  if (aba === 'planilha') renderAnoPlanilha(main, ano);
+  else renderAnoResumo(main, ano);
+}
+
+function renderAnoResumo(main, ano) {
+  const c = cats();
+  const map = indexMeses(S.data.meses);
+  const linhas = linhasDoAno(ano, map, c);
+  const st = estatisticas(linhas, c, prefs());
+  const linhasAnt = linhasDoAno(ano - 1, map, c);
+  const stAnt = estatisticas(linhasAnt, c, prefs());
+  const p = prefs();
+
+  if (!st.mesesComDados) {
+    main.innerHTML = `${cabecalhoAno(ano, 'resumo', st)}
+      <section class="card vazio">
+        <h2>Nenhum mês lançado em ${ano}</h2>
+        <p>Comece pelo mês atual na tela <b>Mês</b>, ou abra a aba <b>Planilha</b> e toque em qualquer mês para lançar.</p>
+        <div class="acoes"><a class="btn primario" href="#/mes">Ir para o mês</a><a class="btn" href="#/ano/${ano}/planilha">Abrir planilha de ${ano}</a></div>
+      </section>`;
+    bindCabecalhoAno(main, 'resumo');
+    return;
+  }
+
+  const com = linhas.filter((l) => l.temDados);
+  const pega = (k, maior) => com.filter((l) => l[k] !== null).sort((a, b) => (maior ? b[k] - a[k] : a[k] - b[k]))[0];
+  const melhor = pega('saldoMes', true), pior = pega('saldoMes', false);
+  const maisGasto = pega('totalDesp', true), maisReceita = pega('receita', true);
+  const nomeMes = (l) => (l ? MESES[l.mes - 1] : '—');
+  const temAnt = stAnt.mesesComDados > 0;
+  const vsAnt = `vs ${ano - 1}`;
+
+  // Para onde foi a receita do ano
+  const receita = st.receitaTotal;
+  const sobra = st.saldoTotal;
+  const base = Math.max(receita, st.gastoTotal) || 1;
+  const partes = [
+    ...st.porCategoria.filter((x) => x.total > 0).map((x) => ({ nome: x.cat.nome, valor: x.total, cor: corCat(x.cat) })),
+    ...(sobra > 0 ? [{ nome: 'Sobra', valor: sobra, cor: 'var(--pos)' }] : []),
+  ];
+  const pctReceita = (v) => (receita > 0 ? ` <small>${Math.round((v / receita) * 100)}%</small>` : '');
+
+  const metaAno = receita * p.pct_investir;
+  const pctMeta = metaAno > 0 ? Math.min(100, (st.totalInvestido / metaAno) * 100) : 0;
+  const maxGastar = st.maximoGastar;
+
+  main.innerHTML = `${cabecalhoAno(ano, 'resumo', st)}
+    <div class="mes-grid">
+      <section class="card hero">
+        <div class="hero-cab">
+          <div>
+            <span class="rotulo">Sobra de ${ano} (receita − despesas)</span>
+            <strong class="valor-grande ${cls(sobra)}">${fmtBRL(sobra)}</strong>
+            <p class="sub">${receita > 0
+              ? sobra >= 0 ? `<span class="pos">${Math.round((sobra / receita) * 100)}% da receita</span> ficou com você`
+                : `<span class="neg">gastou ${fmtBRL(-sobra)} além da receita</span>`
+              : 'sem receita lançada'}
+              ${temAnt ? delta(sobra, stAnt.saldoTotal, vsAnt) : ''}</p>
+          </div>
+          <div class="hero-lado">
+            <div><span>Receita do ano</span><strong>${fmtBRL(receita)}</strong>${temAnt ? delta(receita, stAnt.receitaTotal, vsAnt) : ''}</div>
+            <div><span>Despesas do ano</span><strong>${fmtBRL(st.gastoTotal)}</strong>${temAnt ? delta(st.gastoTotal, stAnt.gastoTotal, vsAnt, true) : ''}</div>
+          </div>
+        </div>
+        <div class="barra-empilhada" role="img" aria-label="Divisão da receita do ano">
+          ${partes.map((x) => `<span style="width:${(x.valor / base) * 100}%;background:${x.cor}" title="${esc(x.nome)}: ${fmtBRL(x.valor)}"></span>`).join('')}
+        </div>
+        <ul class="legenda">
+          ${partes.map((x) => `<li><span class="dot" style="background:${x.cor}"></span><span>${esc(x.nome)}</span><b>${fmtBRL(x.valor)}${pctReceita(x.valor)}</b></li>`).join('')}
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Médias por mês</h2>
+        <dl class="lista">
+          <div><dt>Receita</dt><dd>${fmtBRL(st.mediaReceita)}</dd></div>
+          <div><dt>Despesas</dt><dd>${fmtBRL(st.mediaDespesas)}</dd></div>
+          <div><dt>No débito</dt><dd>${fmtBRL(st.mediaDebito)}</dd></div>
+          <div><dt>No crédito</dt><dd>${fmtBRL(st.mediaCredito)}</dd></div>
+          <div><dt>Investimento</dt><dd>${fmtBRL(st.mediaInvestimento)}</dd></div>
+        </dl>
+        <p class="hint">Contam só os meses lançados (${st.mesesComDados}).</p>
+      </section>
+
+      <section class="card grafico largo">
+        <h2>Mês a mês em ${ano}</h2>
+        <div class="canvas-box"><canvas id="g-ano"></canvas></div>
+      </section>
+
+      <section class="card">
+        <h2>Cartões e categorias no ano</h2>
+        ${st.porCategoria.filter((x) => x.meses).map((x) => `
+          <div class="linha-cat">
+            <span class="dot" style="background:${corCat(x.cat)}"></span>
+            <div class="nome">${esc(x.cat.nome)}<small>${x.cat.tipo === 'debito' ? 'débito' : 'crédito'} · média ${fmtBRL(x.media)}/mês</small></div>
+            <div class="val"><strong>${fmtBRL(x.total)}</strong><span class="delta">${st.gastoTotal ? Math.round((x.total / st.gastoTotal) * 100) : 0}% das despesas</span></div>
+          </div>`).join('')}
+        <div class="linha-total"><span>Crédito ${fmtBRL(st.creditoTotal)} · Débito ${fmtBRL(st.debitoTotal)}</span></div>
+      </section>
+
+      <section class="card">
+        <h2>Destaques do ano</h2>
+        <dl class="lista">
+          <div><dt>Melhor mês (maior sobra)</dt><dd>${nomeMes(melhor)}<small class="pos">${melhor ? fmtBRL(melhor.saldoMes) : ''}</small></dd></div>
+          <div><dt>Pior mês (menor sobra)</dt><dd>${nomeMes(pior)}<small class="${cls(pior?.saldoMes)}">${pior ? fmtBRL(pior.saldoMes) : ''}</small></dd></div>
+          <div><dt>Mês com mais despesas</dt><dd>${nomeMes(maisGasto)}<small>${maisGasto ? fmtBRL(maisGasto.totalDesp) : ''}</small></dd></div>
+          <div><dt>Mês com mais receita</dt><dd>${nomeMes(maisReceita)}<small>${maisReceita ? fmtBRL(maisReceita.receita) : ''}</small></dd></div>
+          <div><dt>Meses com saldo negativo</dt><dd>${st.mesesNegativos}</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>Investimentos</h2>
+        <dl class="lista">
+          <div><dt>Total investido</dt><dd>${fmtBRL(st.totalInvestido)}</dd></div>
+          <div><dt>Meta do ano (${fmtPct(p.pct_investir)} da receita)</dt><dd>${fmtBRL(metaAno)}</dd></div>
+        </dl>
+        <div class="progresso"><span style="width:${pctMeta}%"></span></div>
+        <dl class="lista">
+          <div><dt>Rendimento / outras entradas</dt><dd>${fmtBRL(st.totalRendimento)}</dd></div>
+          <div><dt>Reserva esperada (${p.meses_reserva}× receita média)</dt><dd>${fmtBRL(st.reservaEsperada)}</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>Saldo financeiro</h2>
+        <dl class="lista">
+          <div><dt>Saldo no início do ano</dt><dd>${fmtBRL(st.saldoInicio)}</dd></div>
+          <div><dt>Último saldo informado</dt><dd>${fmtBRL(st.ultimoSaldo)}</dd></div>
+          <div class="destaque"><dt>Resultado acumulado</dt><dd class="${cls(st.resultadoAcumulado)}">${fmtBRL(st.resultadoAcumulado)}</dd></div>
+          <div><dt>Média do resultado por mês</dt><dd class="${cls(st.mediaResultado)}">${fmtBRL(st.mediaResultado)}</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>Organização</h2>
+        <dl class="lista">
+          <div><dt>Máximo para gastar por mês (${fmtPct(p.pct_max_gasto)})</dt><dd>${fmtBRL(maxGastar)}</dd></div>
+          <div><dt>Despesa média por mês</dt><dd class="${st.mediaDespesas > maxGastar ? 'neg' : 'pos'}">${fmtBRL(st.mediaDespesas)}</dd></div>
+          <div><dt>Investir por mês (${fmtPct(p.pct_investir)})</dt><dd>${fmtBRL(st.investirEsperado)}</dd></div>
+          <div><dt>Investimento médio por mês</dt><dd class="${st.mediaInvestimento >= st.investirEsperado ? 'pos' : 'neg'}">${fmtBRL(st.mediaInvestimento)}</dd></div>
+        </dl>
+      </section>
+
+      <section class="card grafico">
+        <h2>Evolução do saldo (dia 1º de cada mês)</h2>
+        <div class="canvas-box pequeno"><canvas id="g-saldo"></canvas></div>
+      </section>
+
+      ${temAnt ? `
+      <section class="card largo">
+        <h2>Comparado a ${ano - 1}</h2>
+        <div class="comparativo">
+          ${[
+            ['Receita', st.receitaTotal, stAnt.receitaTotal, false],
+            ['Despesas', st.gastoTotal, stAnt.gastoTotal, true],
+            ['Sobra', st.saldoTotal, stAnt.saldoTotal, false],
+            ['Investido', st.totalInvestido, stAnt.totalInvestido, false],
+            ['Despesa média/mês', st.mediaDespesas, stAnt.mediaDespesas, true],
+          ].map(([k, a, b, menor]) => `<div><span>${k}</span><strong>${fmtBRL(a)}</strong><small>${ano - 1}: ${fmtBRL(b)}</small>${delta(a, b, '', menor)}</div>`).join('')}
+        </div>
+      </section>` : ''}
+    </div>`;
+
+  bindCabecalhoAno(main, 'resumo');
+  grafico(main.querySelector('#g-ano'), linhas);
+  graficoSaldo(main.querySelector('#g-saldo'), linhas);
+}
+
+function graficoSaldo(canvas, linhas) {
+  if (!window.Chart || !canvas) return;
+  const text = cssVar('--muted');
+  S.charts.push(new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: linhas.map((r) => MESES_CURTO[r.mes - 1]),
+      datasets: [{
+        label: 'Saldo inicial', data: linhas.map((r) => r.saldoIni), spanGaps: true, tension: 0.3,
+        borderColor: cssVar('--accent'), backgroundColor: cssVar('--accent'), pointRadius: 3,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmtBRL(c.parsed.y) } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: text } },
+        y: { grid: { color: cssVar('--border') }, ticks: { color: text, callback: (v) => v.toLocaleString('pt-BR') } },
+      },
+    },
+  }));
+}
+
+function renderAnoPlanilha(main, ano) {
   const c = cats();
   const map = indexMeses(S.data.meses);
   const linhas = linhasDoAno(ano, map, c);
   // Mostra categorias ativas + inativas que têm valor neste ano
   const colunas = c.filter((cat) => cat.ativo !== false || linhas.some((l) => l.desp[cat.id] !== null));
   const st = estatisticas(linhas, c, prefs());
-  const anos = [...new Set([...anosComDados(S.data.meses), anoAtual(), ano])].sort((a, b) => a - b);
 
   const td = (v, colorir = false, calc = false) =>
     `<td class="${calc ? 'calc ' : ''}${colorir ? cls(v) : ''}">${v === null || v === undefined ? '' : fmtNum(v)}</td>`;
@@ -682,14 +930,7 @@ function renderAno(main, ano) {
   const tot = (k) => linhas.reduce((s, l) => s + (l[k] ?? 0), 0);
 
   main.innerHTML = `
-    <div class="titulo">
-      <div class="seletor-ano">
-        <a class="btn icone" href="#/ano/${ano - 1}" aria-label="Ano anterior">‹</a>
-        <select aria-label="Ano">${[...new Set([...anos, ano - 1, ano + 1])].sort().map((a) => `<option ${a === ano ? 'selected' : ''}>${a}</option>`).join('')}</select>
-        <a class="btn icone" href="#/ano/${ano + 1}" aria-label="Próximo ano">›</a>
-      </div>
-      <p class="sub">${st.mesesComDados ? `${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês lançado' : 'meses lançados'} · toque num mês para editar` : 'Nenhum mês lançado neste ano · toque num mês para lançar'}</p>
-    </div>
+    ${cabecalhoAno(ano, 'planilha', st)}
 
     ${st.mesesComDados ? `
     <section class="kpis">
@@ -776,7 +1017,7 @@ function renderAno(main, ano) {
     ]) : ''}
     </section>`;
 
-  main.querySelector('select').addEventListener('change', (e) => (location.hash = `#/ano/${e.target.value}`));
+  bindCabecalhoAno(main, 'planilha');
   main.querySelectorAll('tr[data-mes]').forEach((tr) => {
     const abrir = () => abrirEditor(ano, Number(tr.dataset.mes));
     tr.addEventListener('click', abrir);
@@ -915,7 +1156,8 @@ async function abrirEditor(ano, mes) {
     if (await salvar()) {
       fechar();
       const r = rota();
-      const destino = r.view === 'mes' ? `#/mes/${ano}/${mes}` : r.view === 'ano' ? `#/ano/${ano}` : location.hash;
+      const destino = r.view === 'mes' ? `#/mes/${ano}/${mes}`
+        : r.view === 'ano' ? `#/ano/${ano}${r.aba === 'planilha' ? '/planilha' : ''}` : location.hash;
       if (destino !== location.hash) location.hash = destino; else render();
     }
   });
@@ -942,17 +1184,97 @@ async function abrirEditor(ano, mes) {
   if (!mesTemDados(rec)) form.querySelector('input[name="receita"]').focus();
 }
 
+/* ============================================================== ajuda */
+const GLOSSARIO = [
+  ['Receita', 'Todo o dinheiro que entrou no mês: salário, pró-labore, faturamento, vendas. Se vier de vários lugares, some com =: =2500+800.'],
+  ['Débito / conta', 'Gastos pagos direto da conta: Pix, boleto, débito, transferências. Pode ter mais de uma categoria de débito (ex.: "Débito pessoal", "Funcionários").'],
+  ['Crédito (cartões)', 'O valor da fatura de cada cartão no mês. Cada cartão é uma categoria: "Crédito Iogo", "Cartão empresa"...'],
+  ['Total de despesas', 'Débito + todos os cartões. Calculado sozinho.'],
+  ['Sobra do mês (saldo do mês)', 'Receita − despesas. Verde: sobrou dinheiro. Vermelho: gastou mais do que entrou.'],
+  ['Investimento', 'Quanto foi guardado/investido no mês.'],
+  ['Rendimento / outras entradas', 'Rendimento dos investimentos ou dinheiro extra que não é receita (reembolso, venda de algo). Anote a origem em Observação.'],
+  ['Saldo inicial', 'Quanto havia no total (conta + investimentos) no dia 1º do mês. É o número que mostra se o patrimônio cresceu.'],
+  ['Saldo final', 'É o saldo inicial do mês seguinte, puxado sozinho. Por isso ele só aparece depois que o mês seguinte é lançado.'],
+  ['Resultado do saldo', 'Saldo final − saldo inicial. Mostra quanto o dinheiro guardado cresceu (verde) ou diminuiu (vermelho) no mês.'],
+  ['Médias', 'Contam só os meses lançados. Um mês em branco não puxa a média para baixo.'],
+  ['Organização (15% / 6× / 70%)', 'Metas a partir da receita média: investir 15%, ter reserva de 6 meses de receita e gastar no máximo 70%. Os percentuais mudam em Ajustes.'],
+];
+
+function renderAjuda(main) {
+  main.innerHTML = `
+    <div class="titulo"><div><h1>Ajuda</h1><p class="sub">Como usar o Finanças Marques, passo a passo.</p></div></div>
+
+    <div class="ajuda-grid">
+      <section class="card">
+        <h2>Rotina de cada mês (5 minutos)</h2>
+        <ol class="passos">
+          <li><b>No início do mês</b>, abra a tela <b>Mês</b> e vá para o mês que terminou (setas ‹ ›).</li>
+          <li>Toque em <b>Lançar</b> (ou <b>Editar mês</b>) e preencha a <b>receita</b> do mês.</li>
+          <li>Preencha os gastos: o total do <b>débito</b> e a <b>fatura de cada cartão</b>.</li>
+          <li>Preencha o <b>investimento</b> e o <b>rendimento / outras entradas</b>, se houver.</li>
+          <li>Lance também o mês novo só com o <b>saldo inicial</b> (quanto há na conta + investimentos no dia 1º). Isso fecha o saldo final do mês anterior.</li>
+          <li>Pronto: confira a <b>sobra</b> e os alertas na tela Mês.</li>
+        </ol>
+        <p class="hint">Dá para digitar contas nos campos: <code>=1598,40-38,90</code> ou <code>=120+80,50</code>. O site guarda a conta e mostra o resultado.</p>
+      </section>
+
+      <section class="card">
+        <h2>Para que serve cada tela</h2>
+        <dl class="lista telas">
+          <div><dt>${ICON.mes} Mês</dt><dd>O resumo de um mês: quanto sobrou, para onde foi o dinheiro, cada cartão e a comparação com o mês anterior. É a tela do dia a dia.</dd></div>
+          <div><dt>${ICON.ano} Ano · Resumo</dt><dd>O ano inteiro: total que entrou e saiu, divisão por cartão/categoria, melhores e piores meses, investimentos e evolução do saldo.</dd></div>
+          <div><dt>${ICON.ano} Ano · Planilha</dt><dd>Igual à aba do ano no Excel: um mês por linha e as informações gerais ao lado. Toque num mês para editar.</dd></div>
+          <div><dt>${ICON.geral} Todos os anos</dt><dd>Soma de todos os anos, com filtro por período e por cartão/categoria.</dd></div>
+          <div><dt>${ICON.ajustes} Ajustes</dt><dd>Cartões e categorias, metas (15%/6×/70%), importar a planilha do Excel e backup.</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>Configurar uma conta nova</h2>
+        <ol class="passos">
+          <li>A pessoa cria a conta em <b>Criar conta</b> e confirma pelo e-mail. A conta precisa estar <b>liberada</b> (convite pelo e-mail).</li>
+          <li>Em <b>Ajustes → Cartões e categorias</b>, cadastre o que a pessoa usa. Exemplos:
+            <ul>
+              <li><b>Crédito:</b> um item para cada cartão ("Cartão pessoal", "Cartão empresa").</li>
+              <li><b>Débito:</b> "Débito pessoal" e, para empresa, "Funcionários", "Fornecedores", "Impostos"...</li>
+            </ul>
+            Pessoal e empresa ficam juntos; use nomes que deixem claro de onde é cada gasto.</li>
+          <li>Ajuste as <b>metas</b> (15% investir, 6× reserva, 70% máximo de gasto) se precisar.</li>
+          <li>Se a pessoa já tem a planilha do Excel, use <b>Importar planilha</b>. Senão, lance os meses pela tela <b>Mês</b>.</li>
+        </ol>
+      </section>
+
+      <section class="card">
+        <h2>Dicas</h2>
+        <ul class="passos">
+          <li><b>Celular e iPad:</b> abra o site no navegador → Compartilhar → <b>Adicionar à Tela de Início</b>. Fica como um app.</li>
+          <li><b>Mês em branco</b> não entra nas médias. Lance só o que já fechou.</li>
+          <li><b>Cartão que deixou de usar:</b> em Ajustes use <b>Arquivar</b>. O histórico continua contando.</li>
+          <li><b>Backup:</b> em Ajustes → Baixar backup, de vez em quando.</li>
+          <li>Os dados ficam salvos na nuvem: o que você lança no computador aparece no celular.</li>
+        </ul>
+      </section>
+
+      <section class="card largo">
+        <h2>O que significa cada número</h2>
+        <dl class="glossario">
+          ${GLOSSARIO.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}
+        </dl>
+      </section>
+    </div>`;
+}
+
 /* ============================================================ ajustes */
 function renderAjustes(main) {
   const c = cats();
   const usada = (id) => S.data.meses.some((m) => m.despesas && m.despesas[id] !== undefined && m.despesas[id] !== null);
   const p = prefs();
   main.innerHTML = `
-    <div class="titulo"><div><h1>Ajustes</h1><p class="sub">${esc(S.user.email || '')}</p></div></div>
+    <div class="titulo"><div><h1>Ajustes</h1><p class="sub">Configure o que o site usa nos cálculos. Conta: ${esc(S.user.email || '')}</p></div></div>
 
     <section class="card">
-      <h2>Cartões e categorias de despesa</h2>
-      <p class="sub">Cada categoria vira uma coluna do ano. "Débito" entra na média de débito; "Crédito" entra no total e na média de crédito.</p>
+      <h2>1. Cartões e categorias de despesa</h2>
+      <p class="sub">Cada item vira um campo no lançamento do mês e uma coluna na planilha do ano. Use <b>Crédito</b> para cartões (cada cartão um item) e <b>Débito</b> para o que sai direto da conta. Pessoal e empresa ficam juntos: dê nomes claros, ex. "Cartão empresa", "Funcionários".</p>
       <div class="lista-cat">
         ${c.map((cat, i) => `
           <div class="cat ${cat.ativo === false ? 'inativa' : ''}" data-id="${cat.id}">
@@ -978,8 +1300,8 @@ function renderAjustes(main) {
     </section>
 
     <section class="card">
-      <h2>Organização das finanças</h2>
-      <p class="sub">Usado no painel "Organização finanças" de cada ano (base: média de receita por mês).</p>
+      <h2>2. Metas</h2>
+      <p class="sub">Calculadas sobre a receita: quanto investir, quantos meses de reserva ter e o máximo para gastar. Aparecem nas telas Mês e Ano.</p>
       <form class="prefs">
         <label class="campo"><span>% esperado para investir</span><input name="pct_investir" inputmode="decimal" value="${fmtNum(p.pct_investir * 100)}"></label>
         <label class="campo"><span>Reserva esperada (meses de receita)</span><input name="meses_reserva" inputmode="decimal" value="${fmtNum(p.meses_reserva)}"></label>
@@ -989,14 +1311,14 @@ function renderAjustes(main) {
     </section>
 
     <section class="card">
-      <h2>Importar planilha do Excel</h2>
+      <h2>3. Importar planilha do Excel</h2>
       <p class="sub">Selecione o arquivo <b>FINANÇAS GERAIS.xlsx</b>. As abas de ano (2026, 2027…) são lidas aqui no navegador; meses que já existirem no site serão substituídos.</p>
       <label class="btn arquivo">Escolher planilha…<input type="file" accept=".xlsx,.xls" data-a="xlsx" hidden></label>
       <div class="import-preview"></div>
     </section>
 
     <section class="card">
-      <h2>Backup</h2>
+      <h2>4. Backup</h2>
       <p class="sub">Baixe uma cópia de todos os dados (JSON) ou restaure um backup.</p>
       <div class="acoes">
         <button class="btn" data-a="exportar">Baixar backup</button>
@@ -1176,6 +1498,7 @@ const ICON = {
   ano: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>'),
   ajustes: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   mais: svg('<path d="M12 5v14M5 12h14"/>'),
+  ajuda: svg('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17h.01"/>'),
 };
 
 boot();
