@@ -56,3 +56,8 @@ e abra http://localhost:5500
 ## Privacidade
 A planilha nunca vai para o repositório (`.gitignore` bloqueia `.xlsx`). A importação lê o arquivo
 no próprio navegador e grava só no seu banco Supabase.
+
+## Atualizar o site
+Antes de cada commit, rode `sh versao.sh` (carimba uma versão nova nos arquivos para os
+navegadores não misturarem arquivos antigos do cache com os novos). Depois `git push`:
+o GitHub Pages publica em ~1 minuto.

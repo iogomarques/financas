@@ -1,7 +1,7 @@
 // Camada de dados. Dois modos:
 //  - "supabase": dados na nuvem, sincronizados entre computador, celular e iPad (com login).
 //  - "local":    dados só neste navegador (usado enquanto o Supabase não está configurado).
-import { uid } from './util.js';
+import { uid } from './util.js?v=20261116132048';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 

@@ -1,7 +1,7 @@
-import { createStore, PREFS_PADRAO } from './store.js';
-import { MESES, MESES_CURTO, indexMeses, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js';
-import { lerPlanilha } from './importer.js';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261116132048';
+import { MESES, MESES_CURTO, indexMeses, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js?v=20261116132048';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261116132048';
+import { lerPlanilha } from './importer.js?v=20261116132048';
 
 const app = document.getElementById('app');
 const S = {
