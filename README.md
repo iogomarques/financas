@@ -1,4 +1,4 @@
-# Finanças Gerais — site
+# Finanças Marques — site
 
 Versão web da planilha **FINANÇAS GERAIS.xlsx**: lança receita, despesas por cartão (débito/crédito),
 investimento, rendimento e saldo inicial mês a mês, e calcula tudo igual à planilha

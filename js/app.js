@@ -1,7 +1,7 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261116132048';
-import { MESES, MESES_CURTO, indexMeses, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js?v=20261116132048';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261116132048';
-import { lerPlanilha } from './importer.js?v=20261116132048';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261116133133';
+import { MESES, MESES_CURTO, indexMeses, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js?v=20261116133133';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261116133133';
+import { lerPlanilha } from './importer.js?v=20261116133133';
 
 const app = document.getElementById('app');
 const S = {
@@ -74,6 +74,7 @@ function grafico(canvas, linhas) {
 
 /* ================================================================== boot */
 async function boot() {
+  S.filtro = lerFiltro();
   try {
     S.store = await createStore();
   } catch (e) {
@@ -121,7 +122,7 @@ function shell(r) {
   const ano = r.view === 'ano' ? r.ano : anoAtual();
   return `
   <header class="topo">
-    <div class="marca"><img src="icons/icon.svg" alt="" width="28" height="28"><span>Finanças</span></div>
+    <div class="marca"><img src="icons/icon.svg" alt="" width="28" height="28"><span>Finanças Marques</span></div>
     <nav class="nav">
       ${item('#/geral', 'geral', 'Visão geral', ICON.geral)}
       ${item(`#/ano/${ano}`, 'ano', 'Anos', ICON.ano)}
@@ -156,7 +157,7 @@ function renderLogin(modo = 'entrar') {
   app.innerHTML = `
   <div class="login">
     <form class="card login-card">
-      <div class="marca grande"><img src="icons/icon.svg" alt="" width="40" height="40"><span>Finanças Gerais</span></div>
+      <div class="marca grande"><img src="icons/icon.svg" alt="" width="40" height="40"><span>Finanças Marques</span></div>
       <h1>${titulo}</h1>
       <label>E-mail<input type="email" name="email" autocomplete="email" required></label>
       ${modo !== 'senha' ? `<label>Senha<input type="password" name="senha" autocomplete="${modo === 'criar' ? 'new-password' : 'current-password'}" minlength="6" required></label>` : ''}
@@ -206,7 +207,7 @@ function renderSemAcesso() {
   app.innerHTML = `
   <div class="login">
     <div class="card login-card">
-      <div class="marca grande"><img src="icons/icon.svg" alt="" width="40" height="40"><span>Finanças Gerais</span></div>
+      <div class="marca grande"><img src="icons/icon.svg" alt="" width="40" height="40"><span>Finanças Marques</span></div>
       <h1>Conta sem acesso</h1>
       <p class="sub">Você entrou como <b>${esc(S.user.email || '')}</b>, mas esta conta ainda não foi liberada para o site de finanças.</p>
       <p class="sub">Código da conta (para liberar o acesso):</p>
@@ -233,22 +234,113 @@ function traduzErro(m) {
 }
 
 /* ========================================================== visão geral */
-function todasAsLinhas() {
-  const map = indexMeses(S.data.meses);
-  const anos = anosComDados(S.data.meses);
-  const porAno = anos.map((ano) => ({ ano, linhas: linhasDoAno(ano, map, cats()) }));
-  return { anos, porAno, todas: porAno.flatMap((a) => a.linhas) };
+/* ---------------------------------------------------------- filtro */
+const FILTRO_KEY = 'financas-filtro-v1';
+const PRESETS = {
+  tudo: 'Todo o período',
+  ano: 'Este ano',
+  anoant: 'Ano passado',
+  '12m': 'Últimos 12 meses',
+  '6m': 'Últimos 6 meses',
+  '3m': 'Últimos 3 meses',
+  personalizado: 'Personalizado',
+};
+function lerFiltro() {
+  try { return JSON.parse(localStorage.getItem(FILTRO_KEY)) || { preset: 'tudo' }; } catch { return { preset: 'tudo' }; }
+}
+function salvarFiltro() {
+  try { localStorage.setItem(FILTRO_KEY, JSON.stringify(S.filtro)); } catch { /* sem armazenamento: filtro vale só nesta visita */ }
+}
+const ymTexto = (n) => `${MESES_CURTO[(n % 100) - 1]}/${String(Math.floor(n / 100)).slice(2)}`;
+const ymInput = (n) => `${Math.floor(n / 100)}-${String(n % 100).padStart(2, '0')}`;
+const ymDeInput = (s) => { const [a, m] = String(s || '').split('-').map(Number); return a && m ? a * 100 + m : null; };
+
+/** Intervalo {de, ate} (AAAAMM) do filtro, ou null para todo o período. */
+function intervalo(f) {
+  const d = new Date();
+  const a = d.getFullYear(), m = d.getMonth() + 1;
+  const ultimos = (n) => {
+    const x = new Date(a, m - n, 1);
+    return { de: x.getFullYear() * 100 + x.getMonth() + 1, ate: a * 100 + m };
+  };
+  switch (f.preset) {
+    case 'ano': return { de: a * 100 + 1, ate: a * 100 + 12 };
+    case 'anoant': return { de: (a - 1) * 100 + 1, ate: (a - 1) * 100 + 12 };
+    case '12m': return ultimos(12);
+    case '6m': return ultimos(6);
+    case '3m': return ultimos(3);
+    case 'personalizado': return { de: ymDeInput(f.de) ?? 0, ate: ymDeInput(f.ate) ?? 999912 };
+    default: return null;
+  }
 }
 
+function filtroHTML(f, todasCats) {
+  const iv = intervalo(f);
+  const sel = f.cats ? todasCats.filter((c) => f.cats.includes(c.id)) : todasCats;
+  const ativo = f.preset !== 'tudo' || !!f.cats;
+  return `
+  <section class="card filtro">
+    <label class="campo"><span>Período</span>
+      <select name="preset">${Object.entries(PRESETS).map(([k, v]) => `<option value="${k}" ${f.preset === k ? 'selected' : ''}>${v}</option>`).join('')}</select>
+    </label>
+    <label class="campo"><span>De</span><input type="month" name="de" value="${iv && iv.de ? ymInput(iv.de) : ''}"></label>
+    <label class="campo"><span>Até</span><input type="month" name="ate" value="${iv && iv.ate < 999912 ? ymInput(iv.ate) : ''}"></label>
+    <details class="filtro-cats">
+      <summary class="btn">Despesas: ${sel.length === todasCats.length ? 'todas' : `${sel.length} de ${todasCats.length}`}</summary>
+      <div class="filtro-cats-lista">
+        ${todasCats.map((c) => `<label><input type="checkbox" value="${c.id}" ${sel.includes(c) ? 'checked' : ''}> ${esc(c.nome)} <small>(${c.tipo === 'debito' ? 'débito' : 'crédito'})</small></label>`).join('')}
+      </div>
+    </details>
+    ${ativo ? '<button class="btn" data-a="limpar-filtro">Limpar filtro</button>' : ''}
+  </section>`;
+}
+
+function bindFiltro(main, todasCats) {
+  const box = main.querySelector('.filtro');
+  if (!box) return;
+  const aplicar = () => { salvarFiltro(); render(); };
+  box.querySelector('[name="preset"]').addEventListener('change', (e) => {
+    const iv = intervalo(S.filtro);
+    S.filtro = { ...S.filtro, preset: e.target.value };
+    if (e.target.value === 'personalizado' && iv) { S.filtro.de = ymInput(iv.de); S.filtro.ate = iv.ate < 999912 ? ymInput(iv.ate) : ''; }
+    aplicar();
+  });
+  box.querySelectorAll('input[type="month"]').forEach((inp) => inp.addEventListener('change', () => {
+    S.filtro = {
+      ...S.filtro,
+      preset: 'personalizado',
+      de: box.querySelector('[name="de"]').value,
+      ate: box.querySelector('[name="ate"]').value,
+    };
+    aplicar();
+  }));
+  box.querySelectorAll('.filtro-cats input').forEach((chk) => chk.addEventListener('change', () => {
+    const marcados = [...box.querySelectorAll('.filtro-cats input:checked')].map((x) => x.value);
+    S.filtro = { ...S.filtro, cats: marcados.length === todasCats.length ? null : marcados, catsAberto: true };
+    aplicar();
+  }));
+  if (S.filtro.catsAberto) { box.querySelector('.filtro-cats').open = true; S.filtro.catsAberto = false; }
+  box.querySelector('[data-a="limpar-filtro"]')?.addEventListener('click', () => { S.filtro = { preset: 'tudo' }; aplicar(); });
+}
+
+/* ========================================================== visão geral */
 function renderGeral(main) {
-  const { porAno, todas } = todasAsLinhas();
-  const c = cats();
+  const f = S.filtro;
+  const todasCats = cats();
+  const c = f.cats ? todasCats.filter((x) => f.cats.includes(x.id)) : todasCats;
+  const map = indexMeses(S.data.meses);
+  const iv = intervalo(f);
+  const dentro = (r) => !iv || (r.ano * 100 + r.mes >= iv.de && r.ano * 100 + r.mes <= iv.ate);
+  const porAno = anosComDados(S.data.meses)
+    .map((ano) => ({ ano, linhas: linhasDoAno(ano, map, c).filter(dentro) }))
+    .filter((a) => a.linhas.some((l) => l.temDados));
+  const todas = porAno.flatMap((a) => a.linhas);
   const st = estatisticas(todas, c, S.data.prefs);
 
-  if (!st.mesesComDados) {
+  if (!st.mesesComDados && !S.data.meses.some(mesTemDados)) {
     main.innerHTML = `
       <section class="vazio card">
-        <h1>Bem-vindo às suas finanças</h1>
+        <h1>Bem-vindo às Finanças Marques</h1>
         <p>Ainda não há meses lançados. Importe a sua planilha <b>FINANÇAS GERAIS.xlsx</b> para trazer todo o histórico, ou lance o primeiro mês.</p>
         <div class="acoes">
           <a class="btn primario" href="#/ajustes">Importar planilha</a>
@@ -261,10 +353,24 @@ function renderGeral(main) {
 
   const comDados = todas.filter((r) => r.temDados);
   const creditos = st.porCategoria.filter((p) => p.cat.tipo === 'credito' && p.meses);
-  main.innerHTML = `
+  const filtrado = !!iv || !!f.cats;
+  const ym = (r) => r.ano * 100 + r.mes;
+  const periodo = !comDados.length ? '' : !iv ? 'Todos os anos'
+    : `${ymTexto(ym(comDados[0]))} a ${ymTexto(ym(comDados[comDados.length - 1]))}`;
+  const cabecalho = `
     <div class="titulo">
-      <div><h1>Visão geral</h1><p class="sub">Todos os anos · ${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês lançado' : 'meses lançados'}</p></div>
+      <div><h1>Visão geral</h1><p class="sub">${periodo}${periodo ? ' · ' : ''}${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês lançado' : 'meses lançados'}${f.cats ? ' · despesas filtradas' : ''}</p></div>
     </div>
+    ${filtroHTML(f, todasCats)}`;
+
+  if (!comDados.length) {
+    main.innerHTML = `${cabecalho}<section class="card vazio"><p>Nenhum mês lançado neste período.</p></section>`;
+    bindFiltro(main, todasCats);
+    return;
+  }
+
+  main.innerHTML = `
+    ${cabecalho}
 
     <section class="kpis">
       ${kpi('Receita total', st.receitaTotal)}
@@ -274,7 +380,7 @@ function renderGeral(main) {
     </section>
 
     <section class="planilha info-esq">
-    ${blocoInfo('Informações gerais (todos os anos)', [
+    ${blocoInfo(filtrado ? 'Informações gerais (filtro)' : 'Informações gerais (todos os anos)', [
       ['', [
         ['Gasto total', st.gastoTotal],
         ['Gasto crédito total', st.creditoTotal],
@@ -295,7 +401,7 @@ function renderGeral(main) {
       ]],
       ['Saldo financeiro (invest. + débito)', [
         ['Último saldo informado', st.ultimoSaldo],
-        ['Resultado acumulado (todos)', st.resultadoAcumulado, true],
+        ['Resultado acumulado', st.resultadoAcumulado, true],
         ['Meses com saldo negativo', st.mesesNegativos, false, 'int'],
       ]],
     ])}
@@ -335,6 +441,7 @@ function renderGeral(main) {
     </div>
     </section>`;
 
+  bindFiltro(main, todasCats);
   main.querySelectorAll('tr[data-ano]').forEach((tr) => tr.addEventListener('click', () => (location.hash = `#/ano/${tr.dataset.ano}`)));
   // Gráfico: do primeiro ao último mês com dados
   const ini = todas.indexOf(comDados[0]);
@@ -399,7 +506,7 @@ function renderAno(main, ano) {
             <th>Mês</th><th>Receita total</th>
             ${colunas.map((cat) => `<th>${esc(cat.nome)}</th>`).join('')}
             <th class="calc">Total despesas</th><th class="calc">Saldo mês</th>
-            <th>Investimento</th><th>Rendimento</th><th>Saldo inicial</th>
+            <th>Investimento</th><th>Rendimento / outras</th><th>Saldo inicial</th>
             <th class="calc">Saldo final</th><th class="calc">Resultado saldo</th>
           </tr></thead>
           <tbody>
@@ -521,7 +628,7 @@ async function abrirEditor(ano, mes) {
         </fieldset>
         <fieldset><legend>Investimento e saldo</legend>
           ${campo('investimento', 'Investimento feito no mês', rec.investimento, f.investimento)}
-          ${campo('rendimento', 'Rendimento', rec.rendimento, f.rendimento)}
+          ${campo('rendimento', 'Rendimento / outras entradas', rec.rendimento, f.rendimento, 'Rendimento do investimento ou dinheiro de outra fonte (fora a receita). Pode somar várias: =9,50+120. Anote a origem em Observação.')}
           ${campo('saldo_inicial', 'Saldo inicial (1º dia do mês)', rec.saldo_inicial, f.saldo_inicial, 'Quanto você tinha no total (investimento + débito) no 1º dia do mês. O saldo final deste mês vem do saldo inicial do mês seguinte.')}
         </fieldset>
         <label class="campo"><span>Observação</span><textarea name="observacao" rows="2">${esc(rec.observacao || '')}</textarea></label>
