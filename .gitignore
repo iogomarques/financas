@@ -1,0 +1,7 @@
+# Nunca subir planilhas ou backups com dados financeiros
+*.xlsx
+*.xls
+*.csv
+financas-backup-*.json
+.DS_Store
+Thumbs.db
