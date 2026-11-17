@@ -1037,3 +1037,25 @@ h3.sub-secao { font-size: .78rem; text-transform: uppercase; letter-spacing: .05
   .graf-rosca { grid-template-columns: minmax(0, 1fr); }
   .graf-rosca .rosca { max-width: 220px; margin: 0 auto; }
 }
+
+/* ===================== Modelos de cartão (parecidos com os de verdade, sem logotipo) */
+.cartao-vis > .cv-topo, .cartao-vis > .cv-meio, .cartao-vis > .cv-pe { position: relative; z-index: 1; }
+/* Preto com o nome grande no fundo e borda azul */
+.cartao-vis.modelo-letreiro { box-shadow: 3px 4px 0 #38bdf8, 0 10px 24px rgba(15, 23, 42, .22); }
+.cartao-vis.modelo-letreiro.clicavel:hover { box-shadow: 3px 4px 0 #38bdf8, 0 16px 30px rgba(15, 23, 42, .28); }
+.cv-letreiro { position: absolute; left: -.08em; top: 50%; transform: translateY(-50%); display: grid; pointer-events: none;
+  font-weight: 900; text-transform: uppercase; line-height: .86; letter-spacing: -.03em; color: rgba(255, 255, 255, .085);
+  font-size: 23cqi; white-space: nowrap; }
+.cartao-vis { container-type: inline-size; }
+.cartao-vis.modelo-letreiro::after { background: radial-gradient(120% 80% at 100% 0%, rgba(255, 255, 255, .08), transparent 55%); }
+/* Preto metal escovado: brilho mais discreto */
+.cartao-vis.modelo-metal::after { background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, .07) 45%, transparent 60%); }
+/* Vermelho liso com marca d'água redonda */
+.cv-marca { position: absolute; left: 50%; top: 50%; width: 19%; aspect-ratio: .7; transform: translate(-50%, -50%) rotate(-8deg);
+  border-radius: 50%; background: rgba(150, 12, 8, .2); pointer-events: none; }
+.cartao-vis.modelo-vermelho-liso::after { background: radial-gradient(120% 80% at 100% 0%, rgba(255, 255, 255, .12), transparent 55%); }
+/* Dourado com escamas */
+.cartao-vis.modelo-dourado-escamas { text-shadow: 0 1px 2px rgba(80, 50, 10, .35); }
+.cartao-vis.modelo-dourado-escamas .cv-tipo { background: rgba(255, 255, 255, .25); }
+/* Escolha do modelo em Ajustes: amostras maiores */
+.cores.modelos .cor-op { width: 54px; height: 34px; }

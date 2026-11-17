@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117180324';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117180324';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117180324';
-import { lerPlanilha } from './importer.js?v=20261117180324';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117180324';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117180324';
-import { ILUSTRA } from './ilustra.js?v=20261117180324';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117182259';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117182259';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117182259';
+import { lerPlanilha } from './importer.js?v=20261117182259';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117182259';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117182259';
+import { ILUSTRA } from './ilustra.js?v=20261117182259';
 
 const app = document.getElementById('app');
 const S = {
@@ -1944,6 +1944,11 @@ function abrirConta(cat) {
 /* ============================================================ cartões */
 // Cores dos cartões desenhados (nomes genéricos; o nome do banco é escrito pelo usuário)
 const ESTILOS = {
+  // Modelos parecidos com cartões de verdade (desenhados, sem logotipo; o nome vem do campo "Banco")
+  letreiro: { nome: 'Modelo: preto com o nome grande', bg: 'linear-gradient(135deg,#18212a,#11181f)', tx: '#ffffff', modelo: true, chip: 'prata' },
+  metal: { nome: 'Modelo: preto metal escovado', bg: 'repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px),linear-gradient(135deg,#53575d,#2e3034 50%,#1c1e21)', tx: '#f1f5f9', modelo: true, chip: 'prata' },
+  'vermelho-liso': { nome: 'Modelo: vermelho liso', bg: 'linear-gradient(135deg,#ec3a2f,#d8211a)', tx: '#ffffff', modelo: true, chip: 'prata' },
+  'dourado-escamas': { nome: 'Modelo: dourado com escamas', bg: 'radial-gradient(circle at 50% 100%,transparent 8px,rgba(255,255,255,.22) 9px,transparent 10.5px) 0 0/18px 11px,linear-gradient(135deg,#dcb873,#bf9248 55%,#a97c35)', tx: '#ffffff', modelo: true, chip: 'prata' },
   preto: { nome: 'Preto', bg: 'linear-gradient(135deg,#3a3f47 0%,#16181c 55%,#0b0c0e 100%)', tx: '#f8fafc' },
   grafite: { nome: 'Grafite', bg: 'linear-gradient(135deg,#64748b,#334155)', tx: '#f8fafc' },
   azul: { nome: 'Azul', bg: 'linear-gradient(135deg,#38bdf8,#0284c7 60%,#075985)', tx: '#ffffff' },
@@ -1967,15 +1972,24 @@ function estiloDe(cat) {
 
 const CHIP = `<svg class="cv-chip" viewBox="0 0 40 30" aria-hidden="true"><rect x="1" y="1" width="38" height="28" rx="5" fill="#e9c46a" stroke="#c99a2e"/>
   <path d="M1 11h12M1 19h12M27 11h12M27 19h12M13 1v28M27 1v28M13 15h14" stroke="#b9862a" stroke-width="1.4" fill="none"/></svg>`;
+const CHIP_PRATA = `<svg class="cv-chip" viewBox="0 0 40 30" aria-hidden="true"><defs><linearGradient id="chip-prata" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f1f5f9"/><stop offset=".5" stop-color="#b8bec7"/><stop offset="1" stop-color="#e2e8f0"/></linearGradient></defs>
+  <rect x="1" y="1" width="38" height="28" rx="5" fill="url(#chip-prata)" stroke="#8b929c"/>
+  <path d="M1 11h12M1 19h12M27 11h12M27 19h12M13 1v28M27 1v28M13 15h14" stroke="#7c838d" stroke-width="1.4" fill="none"/></svg>`;
 const SEM_CONTATO = `<svg class="cv-nfc" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
   <path d="M8.5 7.5a6 6 0 0 1 0 9M12 5a9.5 9.5 0 0 1 0 14M15.5 2.5a13 13 0 0 1 0 19"/></svg>`;
 
 /** Cartão desenhado. */
 function cartaoVisual(cat, { valor = null, rotulo = 'Fatura do mês', classe = '', atributos = '' } = {}) {
-  const e = ESTILOS[estiloDe(cat)];
-  return `<div class="cartao-vis ${classe}" style="--cv-bg:${e.bg};--cv-tx:${e.tx}" ${atributos}>
+  const k = estiloDe(cat);
+  const e = ESTILOS[k];
+  // enfeites dos modelos: o nome grande no fundo (preto com letreiro) ou a marca d'água redonda (vermelho)
+  const palavras = (cat.banco || cat.nome || '').trim().split(' ').filter(Boolean).slice(0, 3);
+  const enfeite = k === 'letreiro' ? `<span class="cv-letreiro" aria-hidden="true">${palavras.map((p) => `<span>${esc(p)}</span>`).join('')}</span>`
+    : k === 'vermelho-liso' ? '<span class="cv-marca" aria-hidden="true"></span>' : '';
+  return `<div class="cartao-vis modelo-${k} ${classe}" style="--cv-bg:${e.bg};--cv-tx:${e.tx}" ${atributos}>
+    ${enfeite}
     <div class="cv-topo"><b class="cv-banco">${esc(cat.banco || cat.nome)}</b><span class="cv-tipo">${cat.tipo === 'credito' ? 'Crédito' : 'Débito'}</span></div>
-    <div class="cv-meio">${CHIP}${SEM_CONTATO}</div>
+    <div class="cv-meio">${e.chip === 'prata' ? CHIP_PRATA : CHIP}${SEM_CONTATO}</div>
     <div class="cv-pe">
       <div class="cv-dono"><small>${esc(cat.banco ? cat.nome : 'Titular')}</small><span>${esc(cat.titular || (cat.banco ? '' : '—'))}</span></div>
       ${valor !== undefined ? `<div class="cv-valor"><small>${rotulo}</small><strong>${valor === null ? '—' : grande(valor)}</strong></div>` : ''}
@@ -3543,8 +3557,12 @@ function renderAjustes(main) {
                 <div class="aparencia-campos">
                   <label class="campo"><span>Banco / nome no cartão</span><input name="banco" maxlength="40" placeholder="Ex.: Mercado Pago, Santander" value="${esc(cat.banco || '')}"></label>
                   <label class="campo"><span>Titular</span><input name="titular" maxlength="40" placeholder="Ex.: Iogo, Ivoney" value="${esc(cat.titular || '')}"></label>
-                  <div class="campo"><span>Cor</span>
-                    <div class="cores">${Object.entries(ESTILOS).map(([k, e]) => `<button type="button" class="cor-op ${estiloDe(cat) === k ? 'ativo' : ''}" data-estilo="${k}"
+                  <div class="campo"><span>Modelo do cartão</span>
+                    <div class="cores modelos">${Object.entries(ESTILOS).filter(([, e]) => e.modelo).map(([k, e]) => `<button type="button" class="cor-op modelo ${estiloDe(cat) === k ? 'ativo' : ''}" data-estilo="${k}"
+                      style="--cv-bg:${e.bg}" title="${e.nome}" aria-label="${e.nome}" aria-pressed="${estiloDe(cat) === k}"></button>`).join('')}</div>
+                  </div>
+                  <div class="campo"><span>Ou só uma cor</span>
+                    <div class="cores">${Object.entries(ESTILOS).filter(([, e]) => !e.modelo).map(([k, e]) => `<button type="button" class="cor-op ${estiloDe(cat) === k ? 'ativo' : ''}" data-estilo="${k}"
                       style="--cv-bg:${e.bg}" title="${e.nome}" aria-label="${e.nome}" aria-pressed="${estiloDe(cat) === k}"></button>`).join('')}</div>
                   </div>
                 </div>
