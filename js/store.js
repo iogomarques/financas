@@ -5,12 +5,12 @@
 // Formato em memória (igual nos dois modos):
 //   { perfis:      [{id, nome, tipo, cor, ordem}],
 //     categorias:  [{id, perfil_id, nome, tipo: 'debito'|'credito', ordem, ativo}]      ← contas e cartões (de onde saiu)
-//     classes:     [{id, perfil_id, nome, cor, ordem, ativo, escopo_padrao}]           ← categorias de gasto (com o quê)
+//     classes:     [{id, perfil_id, nome, cor, ordem, ativo, escopo_padrao, tipo, pai_id}]           ← categorias de gasto (com o quê)
 //     regras:      [{id, perfil_id, texto, classe_id, escopo}]                         ← classificação automática
 //     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
 //     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261117082410';
+import { uid } from './util.js?v=20261117083546';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
@@ -29,7 +29,7 @@ export function normalizarDados(data) {
   const d = {
     perfis: lista(data.perfis),
     categorias: lista(data.categorias),
-    classes: lista(data.classes),
+    classes: lista(data.classes).map((c) => ({ ...c, tipo: c.tipo === 'receita' ? 'receita' : 'despesa', pai_id: c.pai_id || null })),
     regras: lista(data.regras),
     meses: lista(data.meses),
     lancamentos: lista(data.lancamentos),
@@ -148,6 +148,7 @@ function localStore() {
     async deleteClasse(id) {
       const db = read();
       db.classes = db.classes.filter((x) => x.id !== id);
+      db.classes.forEach((x) => { if (x.pai_id === id) x.pai_id = null; }); // subcategorias viram principais
       db.regras = db.regras.filter((r) => r.classe_id !== id);
       db.lancamentos = db.lancamentos.map((l) => (l.classe_id === id ? { ...l, classe_id: null } : l));
       write(db);
@@ -179,7 +180,7 @@ async function supabaseStore(cfg) {
   };
   const PERFIL_COLS = 'id, nome, tipo, cor, ordem';
   const CAT_COLS = 'id, perfil_id, nome, tipo, ordem, ativo, banco, estilo, titular, subtipo, saldo_inicial, saldo_desde, limite, dia_fechamento, dia_vencimento';
-  const CLASSE_COLS = 'id, perfil_id, nome, cor, ordem, ativo, escopo_padrao';
+  const CLASSE_COLS = 'id, perfil_id, nome, cor, ordem, ativo, escopo_padrao, tipo, pai_id';
   const REGRA_COLS = 'id, perfil_id, texto, classe_id, escopo';
   const MES_COLS = 'perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao';
   const PREF_COLS = 'perfil_id, pct_investir, meses_reserva, pct_max_gasto, meus_nomes, modo';
@@ -208,7 +209,7 @@ async function supabaseStore(cfg) {
   }, c);
   const limpaClasse = (c) => comId({
     perfil_id: c.perfil_id, nome: c.nome, cor: c.cor || '#64748b', ordem: c.ordem ?? 0,
-    ativo: c.ativo ?? true, escopo_padrao: c.escopo_padrao || null,
+    ativo: c.ativo ?? true, escopo_padrao: c.escopo_padrao || null, tipo: c.tipo === 'receita' ? 'receita' : 'despesa', pai_id: c.pai_id || null,
   }, c);
   const limpaRegra = (r) => comId({ perfil_id: r.perfil_id, texto: r.texto, classe_id: r.classe_id, escopo: r.escopo || null }, r);
   const limpaPerfil = (p) => comId({ nome: p.nome, tipo: p.tipo || 'pessoal', cor: p.cor || '#0f766e', ordem: p.ordem ?? 0 }, p);
@@ -344,7 +345,7 @@ async function supabaseStore(cfg) {
       check(await sb.from('fin_perfis').delete().not('id', 'is', null));
       if (d.perfis.length) check(await sb.from('fin_perfis').insert(d.perfis.map(limpaPerfil)));
       if (d.categorias.length) check(await sb.from('fin_categorias').insert(d.categorias.map(limpaCat)));
-      if (d.classes.length) check(await sb.from('fin_classes').insert(d.classes.map(limpaClasse)));
+      if (d.classes.length) check(await sb.from('fin_classes').insert([...d.classes].sort((a, b) => (a.pai_id ? 1 : 0) - (b.pai_id ? 1 : 0)).map(limpaClasse)));
       if (d.regras.length) check(await sb.from('fin_regras').insert(d.regras.map(limpaRegra)));
       if (d.meses.length) check(await sb.from('fin_meses').insert(d.meses.map(limpaMes)));
       for (let i = 0; i < d.lancamentos.length; i += 500) {

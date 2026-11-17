@@ -626,10 +626,10 @@ dialog.editor.largo { width: min(1120px, 100vw - 24px); }
 .divisao-leg b { color: var(--text); }
 
 /* ajustes: categorias de gasto e regras */
-.cat.classe { grid-template-columns: 44px 1fr 130px auto; }
+.cat.classe { grid-template-columns: 44px 1fr 160px 130px auto; }
 .cat.classe input[type="color"], .nova-classe input[type="color"] { padding: .2rem; min-height: 40px; cursor: pointer; }
 .cat-acoes .sub { align-self: center; margin: 0 .35rem 0 0; white-space: nowrap; }
-.nova-classe { display: grid; grid-template-columns: 44px 1fr 130px auto; gap: .5rem; }
+.nova-classe { display: grid; grid-template-columns: 44px 1fr 160px 130px auto; gap: .5rem; margin-bottom: 1rem; }
 .lista-regras { display: grid; gap: .45rem; margin-top: .75rem; }
 .regra { display: grid; grid-template-columns: auto 1fr auto 1fr 150px auto; gap: .5rem; align-items: center; }
 .regra input[name="texto"] { font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
@@ -988,4 +988,32 @@ h3.sub-secao { font-size: .78rem; text-transform: uppercase; letter-spacing: .05
   .cal-pontos { display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; }
   .cal-pontos i { width: 6px; height: 6px; border-radius: 50%; }
   .cal-pontos i.marca { background: transparent; border: 1.5px solid var(--muted); width: 5px; height: 5px; }
+}
+
+/* ===================== Subcategorias e categorias de receita */
+.cat.classe.subclasse { margin-left: 1.75rem; position: relative; }
+.cat.classe.subclasse::before { content: "↳"; position: absolute; left: -1.3rem; top: 50%; transform: translateY(-50%); color: var(--muted); }
+.chip.sub { font-size: .82rem; opacity: .92; }
+.subcats { display: grid; gap: .3rem; padding: .25rem 0 .6rem 1.5rem; }
+.subcat { display: grid; grid-template-columns: auto minmax(0, 1fr) 30% auto; gap: .6rem; align-items: center; font-size: .88rem; }
+.subcat .cat-barra { height: 6px; }
+.subcat b { font-weight: 600; white-space: nowrap; }
+
+/* ===================== Cartões: fatura e limite */
+.cartao-item { display: grid; gap: .5rem; align-content: start; }
+.cartao-info { display: grid; gap: .45rem; padding: 0 .25rem; }
+.cartao-info-linha { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+.limite { display: grid; gap: .3rem; }
+.limite-barra { height: 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); overflow: hidden; }
+.limite-barra span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.limite-barra span.medio { background: #f59e0b; }
+.limite-barra span.alto { background: var(--neg); }
+.limite-leg { display: flex; justify-content: space-between; gap: .5rem; font-size: .8rem; color: var(--muted); }
+.limite-leg b { color: var(--text); }
+.detalhe-vis { display: grid; gap: .75rem; align-content: start; }
+.tabela-leve td small.tag { margin-left: .35rem; }
+@media (max-width: 720px) {
+  .cat.classe.subclasse { margin-left: 1rem; }
+  .subcat { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .subcat .cat-barra { display: none; }
 }

@@ -272,3 +272,22 @@ alter table public.fin_categorias add column if not exists saldo_desde date;
 alter table public.fin_categorias add column if not exists limite numeric(14, 2) check (limite is null or limite >= 0);
 alter table public.fin_categorias add column if not exists dia_fechamento int check (dia_fechamento between 1 and 31);
 alter table public.fin_categorias add column if not exists dia_vencimento int check (dia_vencimento between 1 and 31);
+
+-- ===================================================================
+-- Categorias de receita e subcategorias (2026-11-17)
+-- tipo: 'despesa' (com o que foi gasto) ou 'receita' (de onde veio o dinheiro)
+-- pai_id: categoria principal (ex.: Mercado › Hortifruti). Só do mesmo usuário.
+-- ===================================================================
+alter table public.fin_classes
+  add column if not exists tipo text not null default 'despesa',
+  add column if not exists pai_id uuid;
+alter table public.fin_classes drop constraint if exists fin_classes_tipo_check;
+alter table public.fin_classes add constraint fin_classes_tipo_check check (tipo in ('despesa', 'receita'));
+alter table public.fin_classes drop constraint if exists fin_classes_id_user_key;
+alter table public.fin_classes add constraint fin_classes_id_user_key unique (id, user_id);
+alter table public.fin_classes drop constraint if exists fin_classes_pai_fkey;
+alter table public.fin_classes add constraint fin_classes_pai_fkey foreign key (pai_id, user_id)
+  references public.fin_classes (id, user_id) on delete set null (pai_id);
+alter table public.fin_classes drop constraint if exists fin_classes_pai_diferente;
+alter table public.fin_classes add constraint fin_classes_pai_diferente check (pai_id is null or pai_id <> id);
+create index if not exists fin_classes_pai_idx on public.fin_classes (pai_id);

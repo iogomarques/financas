@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117082410';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117082410';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117082410';
-import { lerPlanilha } from './importer.js?v=20261117082410';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117082410';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117082410';
-import { ILUSTRA } from './ilustra.js?v=20261117082410';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117083546';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117083546';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117083546';
+import { lerPlanilha } from './importer.js?v=20261117083546';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117083546';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117083546';
+import { ILUSTRA } from './ilustra.js?v=20261117083546';
 
 const app = document.getElementById('app');
 const S = {
@@ -92,6 +92,47 @@ const classePorId = (id) => S.data.classes.find((c) => c.id === id);
 const LADO = { pessoal: 'Pessoal', empresa: 'Empresa' };
 /** Despesas ainda sem categoria de gasto. */
 const semClasse = (lista) => lista.filter((l) => l.destino === 'despesa' && !l.classe_id);
+const receitasSemClasse = (lista) => lista.filter((l) => l.destino === 'receita' && !l.classe_id);
+/** Que tipo de categoria um lançamento usa: gasto (despesa) ou receita (receita/rendimento). Transferência não tem. */
+const tipoClasseDe = (destino) => (destino === 'despesa' ? 'despesa' : destino === 'receita' || destino === 'rendimento' ? 'receita' : null);
+const tipoDaClasse = (c) => (c?.tipo === 'receita' ? 'receita' : 'despesa');
+const TIPOS_CLASSE = { despesa: 'Gastos', receita: 'Receitas' };
+/** Nome completo: "Mercado › Hortifruti" para subcategorias. */
+function nomeClasse(c) {
+  if (!c) return '';
+  const p = c.pai_id && classePorId(c.pai_id);
+  return p ? `${p.nome} › ${c.nome}` : c.nome;
+}
+/** Categoria principal (a própria, se não for subcategoria). */
+const raizClasse = (c) => (c?.pai_id && classePorId(c.pai_id)) || c;
+/** Categorias de um tipo em árvore: cada principal seguida das suas subcategorias (nivel 0/1). */
+function arvoreClasses(tipo, { incluir = null, todas = false } = {}) {
+  const lista = classes().filter((c) => tipoDaClasse(c) === tipo && (todas || c.ativo !== false || c.id === incluir));
+  const ids = new Set(lista.map((c) => c.id));
+  const raizes = lista.filter((c) => !c.pai_id || !ids.has(c.pai_id));
+  return raizes.flatMap((r) => [{ ...r, nivel: 0 }, ...lista.filter((c) => c.pai_id === r.id).map((c) => ({ ...c, nivel: 1 }))]);
+}
+/** <option>s de categoria do tipo, com as subcategorias recuadas. */
+function opcoesClasses(tipo, sel, vazio = '— sem categoria —') {
+  return `<option value="">${vazio}</option>` + arvoreClasses(tipo, { incluir: sel }).map((c) =>
+    `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${c.nivel ? '   ↳ ' : ''}${esc(c.nome)}</option>`).join('');
+}
+/** Sugere categoria (regra → histórico → parecido) só entre as do tipo certo. */
+function sugerirClasse(descricao, tipo, escopoPadrao) {
+  const ok = (id) => !!id && !!classePorId(id) && tipoDaClasse(classePorId(id)) === tipo;
+  return sugerir(descricao, {
+    regras: S.data.regras.filter((r) => ok(r.classe_id)),
+    classes: S.data.classes,
+    lancamentos: S.data.lancamentos.filter((l) => ok(l.classe_id)),
+    escopoPadrao,
+  });
+}
+/** Texto curto de um lançamento: categoria (ou "sem categoria" / tipo). */
+function rotuloLanc(l) {
+  const c = classePorId(l.classe_id);
+  if (c) return nomeClasse(c);
+  return l.destino === 'despesa' ? 'sem categoria' : DESTINOS[l.destino];
+}
 
 /* ------------------------------------------------ conferência de erros */
 const IGNORADOS_KEY = 'financas-conferencia-ok';
@@ -258,14 +299,25 @@ function bindConferencia(main, problemas) {
 }
 
 /** Cria as categorias sugeridas (Funcionários, Fornecedores, Mercado...). */
-async function criarClassesSugeridas() {
-  const existentes = new Set(S.data.classes.map((c) => normDesc(c.nome)));
+async function criarClassesSugeridas(tipo = 'despesa') {
+  const existentes = new Set(S.data.classes.filter((c) => tipoDaClasse(c) === tipo).map((c) => normDesc(c.nome)));
   let ordem = S.data.classes.length;
-  for (const [nome, cor, escopo_padrao] of CLASSES_SUGERIDAS) {
+  for (const [nome, cor, escopo_padrao] of tipo === 'receita' ? RECEITAS_SUGERIDAS : CLASSES_SUGERIDAS) {
     if (existentes.has(normDesc(nome))) continue;
-    S.data.classes.push(await S.store.saveClasse({ perfil_id: S.perfilId, nome, cor, escopo_padrao, ordem: ++ordem, ativo: true }));
+    S.data.classes.push(await S.store.saveClasse({ perfil_id: S.perfilId, nome, cor, escopo_padrao, tipo, ordem: ++ordem, ativo: true }));
   }
 }
+/** Categorias de receita sugeridas (de onde veio o dinheiro). */
+const RECEITAS_SUGERIDAS = [
+  ['Vendas / clientes', '#10b981', 'empresa'],
+  ['Serviços prestados', '#0d9488', 'empresa'],
+  ['Salário', '#22c55e', 'pessoal'],
+  ['Pró-labore recebido', '#0f766e', 'pessoal'],
+  ['Rendimentos', '#0ea5e9', null],
+  ['Aluguel recebido', '#a855f7', null],
+  ['Reembolsos e estornos', '#64748b', null],
+  ['Outras receitas', '#94a3b8', null],
+];
 
 /** Aplica uma categoria (e o lado) a vários lançamentos; se pedido, cria a regra para as próximas vezes. */
 async function classificar(ids, classeId, ladoEscolhido, textoRegra) {
@@ -734,7 +786,7 @@ function renderMes(main, ano, mes) {
 
       ${creditos.length ? `
       <section class="card">
-        ${tituloCard('Cartões de crédito', 'Fatura de cada cartão neste mês.', 'cartoes')}
+        ${tituloCard('Cartões de crédito', 'Fatura de cada cartão que vence neste mês.', 'cartoes')}
         ${creditos.map(linhaCat).join('')}
         <div class="linha-total"><span>Total no crédito</span><strong>${fmtBRL(l.credito)}</strong></div>
       </section>` : ''}
@@ -779,7 +831,7 @@ function renderMes(main, ano, mes) {
         const tot = gastos.reduce((s, x) => s + x.valor, 0);
         const emp = gastos.filter((x) => x.escopo === 'empresa').reduce((s, x) => s + x.valor, 0);
         const porClasse = new Map();
-        for (const x of gastos) porClasse.set(x.classe_id || '', (porClasse.get(x.classe_id || '') || 0) + x.valor);
+        for (const x of gastos) { const k = raizClasse(classePorId(x.classe_id))?.id || ''; porClasse.set(k, (porClasse.get(k) || 0) + x.valor); }
         const top = [...porClasse.entries()].filter(([id]) => id).sort((a, b) => b[1] - a[1]).slice(0, 6);
         const pend = semClasse(gastos).length;
         const pctEmp = tot ? (emp / tot) * 100 : 0;
@@ -929,10 +981,13 @@ function renderLancamentos(main, ano, mes, aba = 'despesas') {
   const pre = `${ano}-${pad2(mes)}`;
   const doMes = S.data.lancamentos.filter((l) => String(l.data).startsWith(pre));
   const ft = S.filtroTrans || (S.filtroTrans = { busca: '', conta: '', escopo: 'todos', classe: '' });
+  // filtro de categoria só vale na aba do mesmo tipo (gasto x receita); escolher a principal inclui as subcategorias
+  const tipoAba = aba === 'despesas' ? 'despesa' : aba === 'receitas' ? 'receita' : null;
+  const classeFiltro = tipoAba && ft.classe && (ft.classe === 'sem' || tipoDaClasse(classePorId(ft.classe)) === tipoAba) ? ft.classe : '';
   const passa = (l) => (!ft.conta || l.categoria_id === ft.conta)
     && (ft.escopo === 'todos' || l.destino === 'transferencia' || l.escopo === ft.escopo)
     && (!ft.busca || normDesc(l.descricao).includes(normDesc(ft.busca)))
-    && (!ft.classe || (ft.classe === 'sem' ? l.destino === 'despesa' && !l.classe_id : l.classe_id === ft.classe));
+    && (!classeFiltro || (classeFiltro === 'sem' ? !l.classe_id : l.classe_id === classeFiltro || classePorId(l.classe_id)?.pai_id === classeFiltro));
   const soma = (arr) => arr.reduce((s, l) => s + l.valor, 0);
   const desp = doMes.filter((l) => l.destino === 'despesa');
   const rec = doMes.filter((l) => l.destino === 'receita' || l.destino === 'rendimento');
@@ -940,9 +995,10 @@ function renderLancamentos(main, ano, mes, aba = 'despesas') {
   const contagem = { despesas: [desp.length, soma(desp)], receitas: [rec.length, soma(rec)], transferencias: [paresTransferencia(transf).length, null], extrato: [doMes.length, null] };
 
   const chipClasse = (l) => {
-    if (l.destino !== 'despesa') return `<span class="chip-cat" style="--cor:${l.destino === 'rendimento' ? '#0ea5e9' : '#10b981'}">${DESTINOS[l.destino]}</span>`;
     const c = classePorId(l.classe_id);
-    return c ? `<span class="chip-cat" style="--cor:${c.cor}">${esc(c.nome)}</span>` : '<span class="chip-cat sem">sem categoria</span>';
+    if (c) return `<span class="chip-cat" style="--cor:${c.cor}">${esc(nomeClasse(c))}</span>`;
+    if (l.destino !== 'despesa') return `<span class="chip-cat ${l.destino === 'receita' ? 'sem' : ''}" style="--cor:${l.destino === 'rendimento' ? '#0ea5e9' : '#10b981'}">${l.destino === 'receita' ? 'receita sem categoria' : DESTINOS[l.destino]}</span>`;
+    return '<span class="chip-cat sem">sem categoria</span>';
   };
   const chipLado = (l) => (l.destino === 'transferencia' ? '' : `<span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo] || 'Pessoal'}</span>`);
   const celConta = (c, extra = '') => (c ? `<span class="conta-nome">${avatarConta(c)}<span>${esc(c.banco || c.nome)}${extra}</span></span>` : '—');
@@ -967,9 +1023,7 @@ function renderLancamentos(main, ano, mes, aba = 'despesas') {
     <input type="search" data-f="busca" placeholder="Buscar descrição…" value="${esc(ft.busca)}" aria-label="Buscar">
     <select data-f="conta" aria-label="Conta"><option value="">Todas as contas</option>
       ${cats().map((c) => `<option value="${c.id}" ${ft.conta === c.id ? 'selected' : ''}>${esc(c.banco ? `${c.banco} (${c.nome})` : c.nome)}</option>`).join('')}</select>
-    ${aba === 'despesas' ? `<select data-f="classe" aria-label="Categoria"><option value="">Todas as categorias</option>
-      <option value="sem" ${ft.classe === 'sem' ? 'selected' : ''}>Sem categoria</option>
-      ${classes().map((c) => `<option value="${c.id}" ${ft.classe === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}</select>` : ''}
+    ${tipoAba ? `<select data-f="classe" aria-label="Categoria">${opcoesClasses(tipoAba, classeFiltro, 'Todas as categorias').replace('<option value="">Todas as categorias</option>', `<option value="">Todas as categorias</option><option value="sem" ${classeFiltro === 'sem' ? 'selected' : ''}>Sem categoria</option>`)}</select>` : ''}
     ${aba !== 'transferencias' ? `<div class="seg" role="group" aria-label="Pessoal ou empresa">
       ${[['todos', 'Todos'], ['pessoal', 'Pessoal'], ['empresa', 'Empresa']].map(([v, t]) =>
         `<button data-escopo="${v}" class="${ft.escopo === v ? 'ativo' : ''}" aria-pressed="${ft.escopo === v}">${t}</button>`).join('')}</div>` : ''}
@@ -1042,7 +1096,7 @@ function renderLancamentos(main, ano, mes, aba = 'despesas') {
                 const cl = classePorId(l.classe_id);
                 return `<button class="lanc ${t ? 'transf' : ''}" data-id="${l.id}">
                   <span class="lanc-icone" style="--cor:${t ? 'var(--muted)' : cl?.cor || (entrada ? 'var(--pos)' : '#94a3b8')}">${t ? '⇄' : entrada ? '↓' : '↑'}</span>
-                  <span class="lanc-txt"><b>${esc(l.descricao)}</b><small>${l.destino === 'despesa' ? esc(cl?.nome || 'sem categoria') : DESTINOS[l.destino]} · ${esc(c?.banco || c?.nome || l.conta || '')}</small></span>
+                  <span class="lanc-txt"><b>${esc(l.descricao)}</b><small>${esc(rotuloLanc(l))} · ${esc(c?.banco || c?.nome || l.conta || '')}</small></span>
                   <span class="lanc-valor ${t ? '' : entrada ? 'pos' : 'neg'}">${entrada ? '+' : '−'} ${fmtBRL(l.valor)}</span>
                 </button>`;
               }).join('')}</div>`;
@@ -1199,7 +1253,7 @@ function renderCalendario(main, ano, mes) {
         const c = contaPorId(l.categoria_id);
         return `<button class="lanc" data-id="${l.id}">
           <span class="lanc-icone" style="--cor:${TIPOS_CAL[tipoCal(l)].cor}">${tipoCal(l) === 'transf' ? '⇄' : entrada ? '↓' : '↑'}</span>
-          <span class="lanc-txt"><b>${esc(l.descricao)}</b><small>${l.destino === 'despesa' ? esc(classePorId(l.classe_id)?.nome || 'sem categoria') : DESTINOS[l.destino]} · ${esc(c?.banco || c?.nome || l.conta || '')}</small></span>
+          <span class="lanc-txt"><b>${esc(l.descricao)}</b><small>${esc(rotuloLanc(l))} · ${esc(c?.banco || c?.nome || l.conta || '')}</small></span>
           <span class="lanc-valor ${entrada ? 'pos' : ''}">${entrada ? '+' : '−'} ${fmtBRL(l.valor)}</span></button>`;
       }).join('')}
     </section>`;
@@ -1251,9 +1305,8 @@ function abrirLancamento(existente, { ano, mes }, { destino: destinoNovo = 'desp
           <label class="campo"><span>Conta / cartão</span>
             <select name="categoria_id">${c.map((x) => `<option value="${x.id}" ${existente?.categoria_id === x.id ? 'selected' : ''}>${esc(x.nome)} (${x.tipo === 'debito' ? 'débito' : 'crédito'})</option>`).join('')}</select>
           </label>
-          <label class="campo" data-so-despesa><span>Categoria de gasto</span>
-            <select name="classe_id"><option value="">— sem categoria —</option>
-              ${classes().filter((x) => x.ativo !== false || x.id === existente?.classe_id).map((x) => `<option value="${x.id}" ${existente?.classe_id === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select>
+          <label class="campo" data-com-classe><span data-rotulo-classe>Categoria</span>
+            <select name="classe_id"></select>
           </label>
           <div class="campo" data-so-transf><span>Nesta conta, o dinheiro</span>
             <div class="seg" role="radiogroup" aria-label="Sentido">
@@ -1261,7 +1314,7 @@ function abrirLancamento(existente, { ano, mes }, { destino: destinoNovo = 'desp
             </div>
           </div>
         </div>
-        <label class="check-linha" data-so-despesa><input type="checkbox" name="lembrar"> Criar regra: classificar sempre assim quando a descrição tiver
+        <label class="check-linha" data-com-classe><input type="checkbox" name="lembrar"> Criar regra: classificar sempre assim quando a descrição tiver
           <input class="regra-texto" name="texto_regra" value="${esc(regraPadrao(existente?.descricao || ''))}" aria-label="Texto da regra"></label>
         <p class="hint" data-so-transf>Transferência entre as suas contas (ou pagamento da fatura do cartão) fica registrada, mas não conta como receita nem gasto.</p>
         <div class="campo" data-nao-transf><span>Este lançamento é</span>
@@ -1283,9 +1336,19 @@ function abrirLancamento(existente, { ano, mes }, { destino: destinoNovo = 'desp
   document.body.appendChild(dlg);
   const form = dlg.querySelector('form');
   const fechar = () => { dlg.close(); dlg.remove(); };
+  let tipoAtual = null;
   const atualizarTipo = () => {
     const d = form.destino.value;
-    dlg.querySelectorAll('[data-so-despesa]').forEach((x) => { x.hidden = d !== 'despesa'; });
+    // Categoria: de gasto para despesa, de receita para receita/rendimento, nenhuma para transferência
+    const tipo = tipoClasseDe(d);
+    dlg.querySelectorAll('[data-com-classe]').forEach((x) => { x.hidden = !tipo; });
+    if (tipo && tipo !== tipoAtual) {
+      const atual = form.classe_id.value || (tipoAtual === null ? existente?.classe_id : null);
+      const valido = atual && tipoDaClasse(classePorId(atual)) === tipo ? atual : null;
+      form.classe_id.innerHTML = opcoesClasses(tipo, valido);
+      dlg.querySelector('[data-rotulo-classe]').textContent = tipo === 'receita' ? 'Categoria de receita' : 'Categoria de gasto';
+    }
+    tipoAtual = tipo || tipoAtual;
     dlg.querySelectorAll('[data-so-transf]').forEach((x) => { x.hidden = d !== 'transferencia'; });
     dlg.querySelectorAll('[data-nao-transf]').forEach((x) => { x.hidden = d === 'transferencia'; });
   };
@@ -1307,7 +1370,9 @@ function abrirLancamento(existente, { ano, mes }, { destino: destinoNovo = 'desp
     if (existente) return;
     const conta = categoriaPorHistorico(form.descricao.value);
     if (conta && form.categoria_id.querySelector(`option[value="${conta}"]`)) form.categoria_id.value = conta;
-    const sug = sugerir(form.descricao.value, { regras: S.data.regras, classes: S.data.classes, lancamentos: S.data.lancamentos, escopoPadrao: form.escopo.value });
+    const tipo = tipoClasseDe(form.destino.value);
+    if (!tipo) return;
+    const sug = sugerirClasse(form.descricao.value, tipo, form.escopo.value);
     if (sug.classe_id && form.classe_id.querySelector(`option[value="${sug.classe_id}"]`)) {
       form.classe_id.value = sug.classe_id;
       form.querySelector(`[name="escopo"][value="${sug.escopo}"]`).checked = true;
@@ -1326,7 +1391,7 @@ function abrirLancamento(existente, { ano, mes }, { destino: destinoNovo = 'desp
       valor,
       destino,
       categoria_id: form.categoria_id.value || null,
-      classe_id: destino === 'despesa' ? form.classe_id.value || null : null,
+      classe_id: tipoClasseDe(destino) && tipoDaClasse(classePorId(form.classe_id.value)) === tipoClasseDe(destino) ? form.classe_id.value || null : null,
       sentido: destino === 'transferencia' ? form.sentido.value : destino === 'receita' || destino === 'rendimento' ? 'entrada' : 'saida',
       escopo: form.escopo.value,
       origem: existente?.origem || 'manual',
@@ -1444,8 +1509,9 @@ function abrirImportacao({ ano, mes }) {
         && (normDesc(x.descricao).slice(0, 10) === normDesc(l.descricao).slice(0, 10) || x.origem === 'manual'))) status = 'parece';
       const saida = valor < 0;
       // Categoria de gasto e lado: regra → histórico → padrão do arquivo
-      const sug = sugerir(l.descricao, { regras: S.data.regras, classes: S.data.classes, lancamentos: S.data.lancamentos, escopoPadrao: cfg.escopo });
-      const classeId = l.classeEscolhida !== undefined ? l.classeEscolhida : saida ? sug.classe_id : null;
+      // saída procura entre as categorias de gasto; entrada, entre as de receita
+      const sug = sugerirClasse(l.descricao, saida ? 'despesa' : 'receita', cfg.escopo);
+      const classeId = l.classeEscolhida !== undefined ? l.classeEscolhida : sug.classe_id;
       const ladoClasse = classePorId(classeId)?.escopo_padrao;
       // Transferência entre as próprias contas? (fatura, nome próprio, ou par com outra conta já importada)
       const tipoTransf = detectarTransferencia(l.descricao, prefs().meus_nomes || []);
@@ -1462,16 +1528,17 @@ function abrirImportacao({ ano, mes }) {
         destino: l.destinoEscolhido ?? padrao,
         categoria_id: cfg.categoria,
         classe_id: classeId,
-        escopo: l.escopoEscolhido ?? (l.classeEscolhida !== undefined && ladoClasse ? ladoClasse : saida ? sug.escopo : cfg.escopo),
-        por: l.classeEscolhida !== undefined ? null : saida ? sug.por : null,
+        escopo: l.escopoEscolhido ?? (l.classeEscolhida !== undefined && ladoClasse ? ladoClasse : sug.escopo),
+        por: l.classeEscolhida !== undefined ? null : sug.por,
       };
     });
     const datas = linhas.map((l) => l.data).sort();
     const n = (s) => linhas.filter((l) => l.status === s).length;
-    const opcoesClasse = (sel) => `<option value="">— classificar depois —</option>` +
-      classes().filter((x) => x.ativo !== false || x.id === sel).map((x) => `<option value="${x.id}" ${sel === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('');
+    // categoria só vale se for do tipo certo (gasto para despesa, receita para receita)
+    const classeOk = (l) => (tipoClasseDe(l.destino) && l.classe_id && tipoDaClasse(classePorId(l.classe_id)) === tipoClasseDe(l.destino) ? l.classe_id : null);
+    const opcoesClasse = (l) => (tipoClasseDe(l.destino) ? opcoesClasses(tipoClasseDe(l.destino), classeOk(l), '— classificar depois —') : '<option value="">—</option>');
     const selecionadas = linhas.filter((l) => l.incluir && l.status !== 'ja' && l.destino !== 'ignorar');
-    const autoClass = selecionadas.filter((l) => l.destino === 'despesa' && l.classe_id).length;
+    const autoClass = selecionadas.filter((l) => classeOk(l)).length;
     const nTransf = selecionadas.filter((l) => l.destino === 'transferencia').length;
     const semCat = selecionadas.filter((l) => l.destino === 'despesa' && !l.classe_id).length;
 
@@ -1493,7 +1560,7 @@ function abrirImportacao({ ano, mes }) {
             Inverter sinais <small class="sub">(marque se as compras aparecerem como entrada)</small></label>
           <div class="tabela-wrap">
             <table class="tabela import">
-              <thead><tr><th></th><th>Data</th><th>Descrição</th><th>Valor</th><th>Tipo</th><th>Categoria de gasto</th><th>Pessoal / empresa</th></tr></thead>
+              <thead><tr><th></th><th>Data</th><th>Descrição</th><th>Valor</th><th>Tipo</th><th>Categoria</th><th>Pessoal / empresa</th></tr></thead>
               <tbody>
                 ${linhas.map((l) => `
                   <tr data-i="${l.i}" class="${l.status}">
@@ -1505,8 +1572,8 @@ function abrirImportacao({ ano, mes }) {
                       ${[['despesa', 'Despesa'], ['receita', 'Receita'], ['rendimento', 'Rendim./outras'], ['investimento', 'Investimento'], ['transferencia', 'Transferência'], ['ignorar', 'Não importar']]
                         .map(([v, t]) => `<option value="${v}" ${l.destino === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
                       ${l.destino === 'transferencia' && l.transf ? `<span class="tag" title="${l.transf === 'par' ? `Mesmo valor em ${esc(contaDe(l.par))} em ${fmtDia(l.par.data)}` : ''}">${{ fatura: 'fatura', propria: 'conta sua', par: 'par: ' + esc(contaDe(l.par)) }[l.transf]}</span>` : ''}</td>
-                    <td><select data-c="classe" ${l.status === 'ja' || l.destino !== 'despesa' ? 'disabled' : ''}>${opcoesClasse(l.classe_id)}</select>
-                      ${l.por === 'regra' ? '<span class="tag pos" title="Classificado por uma regra">regra</span>' : l.por === 'historico' ? '<span class="tag" title="Igual a um lançamento anterior">anterior</span>' : ''}</td>
+                    <td><select data-c="classe" ${l.status === 'ja' || !tipoClasseDe(l.destino) ? 'disabled' : ''}>${opcoesClasse(l)}</select>
+                      ${!classeOk(l) ? '' : l.por === 'regra' ? '<span class="tag pos" title="Classificado por uma regra">regra</span>' : l.por === 'historico' ? '<span class="tag" title="Igual a um lançamento anterior">anterior</span>' : ''}</td>
                     <td><select data-c="escopo" ${l.status === 'ja' ? 'disabled' : ''}>
                       <option value="pessoal" ${l.escopo === 'pessoal' ? 'selected' : ''}>Pessoal</option>
                       <option value="empresa" ${l.escopo === 'empresa' ? 'selected' : ''}>Empresa</option></select></td>
@@ -1551,7 +1618,7 @@ function abrirImportacao({ ano, mes }) {
       const novos = atuais.map((l) => ({
         perfil_id: S.perfilId, data: l.data, descricao: l.descricao.slice(0, 200), valor: Math.round(l.valor * 100) / 100,
         destino: l.destino, categoria_id: l.categoria_id, // a conta/cartão do arquivo, em qualquer tipo
-        classe_id: l.destino === 'despesa' ? l.classe_id || null : null,
+        classe_id: classeOk(l),
         sentido: l.saida ? 'saida' : 'entrada',
         escopo: l.escopo, origem: 'extrato', conta: nomeConta, chave: l.chave,
       }));
@@ -1734,15 +1801,17 @@ function renderResumo(main, ano, mes) {
           ${cartoes.length ? `<div class="tabela-wrap"><table class="tabela tabela-leve">
             <thead><tr><th>Cartão</th><th>Fechamento</th><th>Vencimento</th><th>Fatura</th><th>Limite disponível</th></tr></thead>
             <tbody>${cartoes.map((c) => {
-              const fat = l.desp[c.id];
+              const f = faturaDoMes(c, ano, mes);
+              const fat = valorFatura(c, ano, mes, l);
+              const lim = limiteCartao(c);
               const dia = (d) => (d ? `${pad2(d)}/${pad2(mes)}` : '—');
               return `<tr class="clicavel" data-ir="#/cartoes/${ano}/${mes}" data-cartao-ir="${c.id}">
                 <th><span class="conta-nome">${avatarConta(c)}<span>${esc(c.banco || c.nome)}<small>${esc(c.banco ? c.nome : '')}${c.titular ? ` · ${esc(c.titular)}` : ''}</small></span></span></th>
-                <td>${dia(c.dia_fechamento)}</td><td>${dia(c.dia_vencimento)}</td>
-                <td><b>${fmtBRL(fat ?? 0)}</b>${delta(fat, lAnt.desp[c.id], 'vs mês ant.', true)}</td>
-                <td>${c.limite ? fmtBRL(Number(c.limite) - (fat ?? 0)) : '—'}</td></tr>`;
+                <td>${f ? fmtDia(f.fim) : dia(c.dia_fechamento)}</td><td>${f ? fmtDia(f.venc) : dia(c.dia_vencimento)}</td>
+                <td><b>${fmtBRL(fat ?? 0)}</b>${f ? `<small class="tag ${STATUS_FATURA[f.status].cls}">${STATUS_FATURA[f.status].nome}</small>` : delta(fat, lAnt.desp[c.id], 'vs mês ant.', true)}</td>
+                <td>${lim ? fmtBRL(lim.disponivel) : c.limite ? fmtBRL(Number(c.limite) - (fat ?? 0)) : '—'}</td></tr>`;
             }).join('')}</tbody>
-            <tfoot><tr><th>Total</th><td></td><td></td><td>${fmtBRL(cartoes.reduce((s, c) => s + (l.desp[c.id] ?? 0), 0))}</td><td></td></tr></tfoot>
+            <tfoot><tr><th>Total</th><td></td><td></td><td>${fmtBRL(cartoes.reduce((s, c) => s + (valorFatura(c, ano, mes, l) ?? 0), 0))}</td><td></td></tr></tfoot>
           </table></div>` : '<p class="sub">Nenhum cartão cadastrado.</p>'}
         </section>
       </div>
@@ -1920,9 +1989,98 @@ function tituloCard(titulo, sub = '', ilustra = '') {
   </div>`;
 }
 
+/* ------------------------------------------------ fatura do cartão (ciclo) */
+const isoDe = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+/** Dia d no mês (ano, mes), sem passar do último dia (ex.: dia 31 em fevereiro = 28/29). */
+const diaNoMes = (ano, mes, d) => new Date(ano, mes - 1, Math.min(d, new Date(ano, mes, 0).getDate()));
+const somaValores = (ls) => ls.reduce((s, l) => s + l.valor, 0);
+const STATUS_FATURA = {
+  aberta: { nome: 'Aberta', cls: '' },
+  fechada: { nome: 'Fechada · a pagar', cls: 'aviso' },
+  paga: { nome: 'Paga', cls: 'pos' },
+  vencida: { nome: 'Pagamento não encontrado', cls: 'aviso' },
+  vazia: { nome: 'Sem compras', cls: '' },
+};
+
+/**
+ * Fatura do cartão que VENCE no mês (ano, mes), pelo dia de fechamento e vencimento.
+ * Compras do dia seguinte ao fechamento anterior até o fechamento. null se o cartão não tem os dois dias.
+ */
+function faturaDoMes(cat, ano, mes) {
+  const F = Number(cat.dia_fechamento), V = Number(cat.dia_vencimento);
+  if (!F || !V) return null;
+  const venc = diaNoMes(ano, mes, V);
+  // fecha antes de vencer: no mesmo mês se o fechamento vem antes do vencimento; senão, no mês anterior
+  const fm = V > F ? { ano, mes } : anterior(ano, mes);
+  const fech = diaNoMes(fm.ano, fm.mes, F);
+  const pf = anterior(fm.ano, fm.mes);
+  const de = diaNoMes(pf.ano, pf.mes, F);
+  de.setDate(de.getDate() + 1);
+  const ini = isoDe(de), fim = isoDe(fech), vencIso = isoDe(venc);
+  const doCartao = S.data.lancamentos.filter((l) => l.categoria_id === cat.id && l.data >= ini && l.data <= fim);
+  const compras = doCartao.filter((l) => l.destino === 'despesa').sort((a, b) => b.data.localeCompare(a.data));
+  const estornos = doCartao.filter((l) => l.destino !== 'despesa' && l.destino !== 'transferencia' && sentidoDe(l) === 'entrada');
+  const total = round2(somaValores(compras) - somaValores(estornos));
+  // Pagamento: "pagamento recebido" no próprio cartão, ou transferência saindo de outra conta com o mesmo valor
+  // (entre o fechamento e uma semana depois do vencimento)
+  const ate = new Date(venc); ate.setDate(ate.getDate() + 7);
+  const janIni = fim, janFim = isoDe(ate);
+  const naJanela = (l) => l.destino === 'transferencia' && l.data > janIni && l.data <= janFim;
+  const pagoNoCartao = somaValores(S.data.lancamentos.filter((l) => naJanela(l) && l.categoria_id === cat.id && sentidoDe(l) === 'entrada'));
+  const pagoDeConta = S.data.lancamentos.some((l) => naJanela(l) && l.categoria_id !== cat.id && sentidoDe(l) === 'saida'
+    && total > 0 && Math.abs(l.valor - total) <= Math.max(1, total * 0.005));
+  const pago = total > 0 && (pagoNoCartao >= total - 1 || pagoDeConta);
+  const hoje = isoHoje();
+  const status = hoje <= fim ? 'aberta' : total <= 0 ? 'vazia' : pago ? 'paga' : hoje <= vencIso ? 'fechada' : 'vencida';
+  return { ini, fim, venc: vencIso, compras, total, pago, status, ano, mes };
+}
+
+/** A fatura em que caem as compras de hoje (a "aberta"), procurando nos próximos meses. */
+function faturaAberta(cat) {
+  const h = new Date();
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(h.getFullYear(), h.getMonth() + i, 1);
+    const f = faturaDoMes(cat, d.getFullYear(), d.getMonth() + 1);
+    if (!f) return null;
+    if (isoHoje() <= f.fim && isoHoje() >= f.ini) return f;
+  }
+  return null;
+}
+
+/** Limite: usado = fatura aberta + faturas fechadas ainda sem pagamento (até 2 anteriores). */
+function limiteCartao(cat) {
+  const limite = Number(cat.limite) || 0;
+  const aberta = faturaAberta(cat);
+  if (!limite || !aberta) return null;
+  let usado = Math.max(0, aberta.total);
+  let { ano, mes } = aberta;
+  for (let i = 0; i < 2; i++) {
+    ({ ano, mes } = anterior(ano, mes));
+    const f = faturaDoMes(cat, ano, mes);
+    if (f && !f.pago && f.total > 0) usado += f.total;
+  }
+  usado = round2(usado);
+  return { limite, usado, disponivel: round2(limite - usado), pct: Math.min(100, (usado / limite) * 100), aberta };
+}
+
+/** Valor da fatura do mês: pelo ciclo (modo controle, com os dias informados) ou o total do mês. */
+function valorFatura(cat, ano, mes, linha) {
+  const f = ehControle() && cat.tipo === 'credito' ? faturaDoMes(cat, ano, mes) : null;
+  return f ? f.total : linha.desp[cat.id];
+}
+
+function barraLimite(lim) {
+  if (!lim) return '';
+  return `<div class="limite" title="Usado ${fmtBRL(lim.usado)} de ${fmtBRL(lim.limite)}">
+    <div class="limite-barra"><span style="width:${lim.pct}%" class="${lim.pct > 90 ? 'alto' : lim.pct > 70 ? 'medio' : ''}"></span></div>
+    <div class="limite-leg"><span>Disponível <b>${fmtBRL(lim.disponivel)}</b></span><span>de ${fmtBRL(lim.limite)}</span></div>
+  </div>`;
+}
+
 function renderCartoes(main, ano, mes) {
   const todas = cats();
-  const acoes = ehControle()
+  const controle = ehControle();
+  const acoes = controle
     ? `<button class="btn primario" data-a="importar-mes">${ICON.upload}<span>Importar extrato</span></button>`
     : `<button class="btn primario" data-a="editar">${ICON.editar}<span>Lançar / editar mês</span></button>`;
   if (!todas.length) {
@@ -1935,38 +2093,61 @@ function renderCartoes(main, ano, mes) {
   const pa = anterior(ano, mes);
   const l = linhaMes(ano, mes, map, todas);
   const ant = linhaMes(pa.ano, pa.mes, map, todas);
-  const doAno = linhasDoAno(ano, map, todas);
   const creditos = todas.filter((c) => c.tipo === 'credito' && (c.ativo !== false || l.desp[c.id] !== null));
   const debitos = todas.filter((c) => c.tipo === 'debito' && (c.ativo !== false || l.desp[c.id] !== null));
-  const totCred = creditos.reduce((s, c) => s + (l.desp[c.id] ?? 0), 0);
-  const totCredAnt = creditos.reduce((s, c) => s + (ant.desp[c.id] ?? 0), 0);
+  // Valor de cada cartão no mês: a fatura que vence no mês (se tiver os dias) ou o gasto do mês
+  const valor = (c, a = ano, m = mes, linha = l) => (c.tipo === 'credito' ? valorFatura(c, a, m, linha) : linha.desp[c.id]);
+  const totCred = creditos.reduce((s, c) => s + (valor(c) ?? 0), 0);
+  const totCredAnt = creditos.reduce((s, c) => s + (valor(c, pa.ano, pa.mes, ant) ?? 0), 0);
   const totDeb = debitos.reduce((s, c) => s + (l.desp[c.id] ?? 0), 0);
+  const limites = controle ? creditos.map((c) => limiteCartao(c)).filter(Boolean) : [];
+  const dispTotal = limites.reduce((s, x) => s + x.disponivel, 0);
   const sel = todas.find((c) => c.id === S.cartaoSel) || creditos[0] || debitos[0];
   S.cartaoSel = sel?.id;
 
-  // Detalhes do cartão escolhido
-  const vals = doAno.map((x) => x.desp[sel.id]).filter((v) => v !== null && v !== undefined);
+  // Detalhes do cartão escolhido (por fatura quando o cartão tem os dias)
+  const fat = controle && sel.tipo === 'credito' ? faturaDoMes(sel, ano, mes) : null;
+  const lim = controle && sel.tipo === 'credito' ? limiteCartao(sel) : null;
+  const doAno = Array.from({ length: 12 }, (_, i) => {
+    const linha = linhaMes(ano, i + 1, map, todas);
+    return { mes: i + 1, v: valor(sel, ano, i + 1, linha) };
+  });
+  const vals = doAno.map((x) => x.v).filter((v) => v !== null && v !== undefined && v !== 0);
   const media = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-  const maior = doAno.filter((x) => x.desp[sel.id] !== null).sort((a, b) => b.desp[sel.id] - a.desp[sel.id])[0];
+  const maior = doAno.filter((x) => x.v).sort((a, b) => b.v - a.v)[0];
   const totalAno = vals.reduce((a, b) => a + b, 0);
-  const compras = ehControle()
-    ? S.data.lancamentos.filter((x) => x.categoria_id === sel.id && x.destino === 'despesa' && String(x.data).startsWith(`${ano}-${pad2(mes)}`))
-      .sort((a, b) => b.data.localeCompare(a.data))
-    : [];
+  const compras = !controle ? []
+    : fat ? fat.compras
+    : S.data.lancamentos.filter((x) => x.categoria_id === sel.id && x.destino === 'despesa' && String(x.data).startsWith(`${ano}-${pad2(mes)}`))
+      .sort((a, b) => b.data.localeCompare(a.data));
+  const semDias = controle && sel.tipo === 'credito' && (!sel.dia_fechamento || !sel.dia_vencimento);
+  const rotuloMes = (c) => (c.tipo === 'credito' ? `Fatura de ${MESES_CURTO[mes - 1].toLowerCase()}` : `Gastos em ${MESES_CURTO[mes - 1].toLowerCase()}`);
 
-  const grade = (lista) => `<div class="cartoes-grade">${lista.map((c) => cartaoVisual(c, {
-    valor: l.desp[c.id], rotulo: c.tipo === 'credito' ? `Fatura de ${MESES_CURTO[mes - 1].toLowerCase()}` : `Gastos em ${MESES_CURTO[mes - 1].toLowerCase()}`,
+  const infoCartao = (c) => {
+    if (!controle || c.tipo !== 'credito') return '';
+    const f = faturaDoMes(c, ano, mes);
+    const lc = limiteCartao(c);
+    if (!f) return '<div class="cartao-info"><span class="sub">Informe fechamento e vencimento para ver a fatura certa.</span></div>';
+    const st = STATUS_FATURA[f.status];
+    return `<div class="cartao-info">
+      <div class="cartao-info-linha"><span class="tag ${st.cls}">${st.nome}</span><span class="sub">vence ${fmtDia(f.venc)}</span></div>
+      ${barraLimite(lc)}
+    </div>`;
+  };
+  const grade = (lista) => `<div class="cartoes-grade">${lista.map((c) => `<div class="cartao-item">${cartaoVisual(c, {
+    valor: valor(c), rotulo: rotuloMes(c),
     classe: `clicavel ${c.id === sel.id ? 'selecionado' : ''}`, atributos: `data-cartao="${c.id}" tabindex="0" role="button" aria-pressed="${c.id === sel.id}"`,
-  })).join('')}</div>`;
+  })}${infoCartao(c)}</div>`).join('')}</div>`;
 
   main.innerHTML = `
     ${cabecalhoMes(ano, mes, '#/cartoes', acoes)}
 
     <section class="card resumo-cartoes">
-      ${tituloCard(`Cartões em ${MESES[mes - 1].toLowerCase()}`, 'Quanto foi gasto em cada cartão e conta neste mês.', 'cartoes')}
+      ${tituloCard(`Cartões em ${MESES[mes - 1].toLowerCase()}`, controle ? 'Faturas que vencem neste mês e o limite que ainda está livre.' : 'Quanto foi gasto em cada cartão e conta neste mês.', 'cartoes')}
       <div class="resumo-cartoes-nums">
-        <div><span>Total nos cartões de crédito</span><strong>${grande(totCred)}</strong>${delta(totCred, totCredAnt, `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`, true)}</div>
-        <div><span>Total no débito / contas</span><strong>${grande(totDeb)}</strong></div>
+        <div><span>${controle ? 'Faturas que vencem no mês' : 'Total nos cartões de crédito'}</span><strong>${grande(totCred)}</strong>${delta(totCred, totCredAnt, `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`, true)}</div>
+        ${limites.length ? `<div><span>Limite disponível agora</span><strong>${grande(dispTotal)}</strong><small class="sub">de ${fmtBRL(limites.reduce((s, x) => s + x.limite, 0))}</small></div>`
+          : `<div><span>Total no débito / contas</span><strong>${grande(totDeb)}</strong></div>`}
         <div><span>Cartões e contas</span><strong>${creditos.length + debitos.length}</strong></div>
       </div>
     </section>
@@ -1976,26 +2157,34 @@ function renderCartoes(main, ano, mes) {
 
     <section class="card detalhe-cartao">
       <div class="detalhe-grid">
-        <div class="detalhe-vis">${cartaoVisual(sel, { valor: l.desp[sel.id], rotulo: sel.tipo === 'credito' ? 'Fatura do mês' : 'Gastos do mês', classe: 'grande' })}</div>
+        <div class="detalhe-vis">${cartaoVisual(sel, { valor: valor(sel), rotulo: sel.tipo === 'credito' ? 'Fatura do mês' : 'Gastos do mês', classe: 'grande' })}
+          ${lim ? barraLimite(lim) : ''}</div>
         <div>
           ${tituloCard(esc(sel.banco || sel.nome), `${sel.banco ? esc(sel.nome) + ' · ' : ''}${sel.tipo === 'credito' ? 'cartão de crédito' : 'conta / débito'}${sel.titular ? ' · ' + esc(sel.titular) : ''}`)}
+          ${semDias ? `<p class="hint aviso-txt">Informe o dia de <b>fechamento</b> e de <b>vencimento</b> deste cartão para o site separar as compras de cada fatura e calcular o limite disponível. <button class="btn" data-a="editar-cartao">Informar agora</button></p>` : ''}
           <dl class="lista">
-            <div><dt>${sel.tipo === 'credito' ? 'Fatura' : 'Gastos'} de ${MESES[mes - 1].toLowerCase()}</dt><dd>${fmtBRL(l.desp[sel.id])}${delta(l.desp[sel.id], ant.desp[sel.id], `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`, true)}</dd></div>
-            <div><dt>${MESES[pa.mes - 1]}</dt><dd>${fmtBRL(ant.desp[sel.id])}</dd></div>
+            ${fat ? `
+              <div><dt>Fatura que vence em ${fmtDia(fat.venc)}</dt><dd>${fmtBRL(fat.total)} <span class="tag ${STATUS_FATURA[fat.status].cls}">${STATUS_FATURA[fat.status].nome}</span></dd></div>
+              <div><dt>Compras de</dt><dd>${fmtDia(fat.ini)} a ${fmtDia(fat.fim)}<small>fecha em ${fmtDia(fat.fim)}</small></dd></div>
+              ${lim ? `<div><dt>Limite</dt><dd>${fmtBRL(lim.limite)}<small>usado ${fmtBRL(lim.usado)} · livre ${fmtBRL(lim.disponivel)}</small></dd></div>
+                <div><dt>Fatura aberta agora</dt><dd>${fmtBRL(lim.aberta.total)}<small>fecha em ${fmtDia(lim.aberta.fim)} · vence ${fmtDia(lim.aberta.venc)}</small></dd></div>` : ''}`
+            : `<div><dt>${sel.tipo === 'credito' ? 'Fatura' : 'Gastos'} de ${MESES[mes - 1].toLowerCase()}</dt><dd>${fmtBRL(l.desp[sel.id])}${delta(l.desp[sel.id], ant.desp[sel.id], `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`, true)}</dd></div>
+              <div><dt>${MESES[pa.mes - 1]}</dt><dd>${fmtBRL(ant.desp[sel.id])}</dd></div>`}
             <div><dt>Média por mês em ${ano}</dt><dd>${fmtBRL(media)}</dd></div>
-            <div><dt>Maior do ano</dt><dd>${maior ? `${fmtBRL(maior.desp[sel.id])}<small>${MESES[maior.mes - 1]}</small>` : '—'}</dd></div>
+            <div><dt>Maior do ano</dt><dd>${maior ? `${fmtBRL(maior.v)}<small>${MESES[maior.mes - 1]}</small>` : '—'}</dd></div>
             <div class="destaque"><dt>Total em ${ano}</dt><dd>${fmtBRL(totalAno)}</dd></div>
           </dl>
+          ${controle ? `<div class="acoes"><button class="btn" data-a="editar-cartao">${ICON.editar}<span>Limite e datas</span></button></div>` : ''}
         </div>
       </div>
       <h3 class="sub-secao">Últimos 12 meses</h3>
       <div class="canvas-box pequeno"><canvas id="g-cartao"></canvas></div>
-      ${ehControle() ? `<h3 class="sub-secao">Compras de ${MESES[mes - 1].toLowerCase()}</h3>
+      ${controle ? `<h3 class="sub-secao">${fat ? `Compras desta fatura (${fmtDia(fat.ini)} a ${fmtDia(fat.fim)})` : `Compras de ${MESES[mes - 1].toLowerCase()}`}</h3>
         ${compras.length ? compras.map((x) => `<button class="lanc" data-id="${x.id}">
           <span class="lanc-icone" style="--cor:${classePorId(x.classe_id)?.cor || '#94a3b8'}">↑</span>
-          <span class="lanc-txt"><b>${esc(x.descricao)}</b><small>${fmtDia(x.data)} · ${esc(classePorId(x.classe_id)?.nome || 'sem categoria')} · ${LADO[x.escopo] || ''}</small></span>
+          <span class="lanc-txt"><b>${esc(x.descricao)}</b><small>${fmtDia(x.data)} · ${esc(rotuloLanc(x))} · ${LADO[x.escopo] || ''}</small></span>
           <span class="lanc-valor neg">− ${fmtBRL(x.valor)}</span></button>`).join('')
-          : '<p class="sub">Nenhuma compra lançada neste cartão no mês. Importe o extrato do cartão em Transações.</p>'}` : ''}
+          : '<p class="sub">Nenhuma compra lançada neste período. Importe o extrato do cartão em Transações.</p>'}` : ''}
     </section>`;
 
   main.querySelectorAll('[data-cartao]').forEach((el) => {
@@ -2004,6 +2193,7 @@ function renderCartoes(main, ano, mes) {
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); escolher(); } });
   });
   main.querySelectorAll('[data-a="editar"]').forEach((b) => b.addEventListener('click', () => abrirEditor(ano, mes)));
+  main.querySelectorAll('[data-a="editar-cartao"]').forEach((b) => b.addEventListener('click', () => abrirConta(sel)));
   main.querySelectorAll('.detalhe-cartao .lanc').forEach((b) => b.addEventListener('click', () => {
     abrirLancamento(S.data.lancamentos.find((x) => x.id === b.dataset.id), { ano, mes });
   }));
@@ -2014,7 +2204,7 @@ function renderCartoes(main, ano, mes) {
     for (let i = 11; i >= 0; i--) {
       const d = new Date(ano, mes - 1 - i, 1);
       const x = linhaMes(d.getFullYear(), d.getMonth() + 1, map, todas);
-      meses12.push({ rotulo: `${MESES_CURTO[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`, v: x.desp[sel.id] });
+      meses12.push({ rotulo: `${MESES_CURTO[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`, v: valor(sel, d.getFullYear(), d.getMonth() + 1, x) });
     }
     const cor = { preto: '#334155', grafite: '#64748b', prata: '#94a3b8', amarelo: '#eab308', dourado: '#d97706' }[estiloDe(sel)]
       || (ESTILOS[estiloDe(sel)].bg.match(/#[0-9a-f]{6}/gi) || ['#0d9488'])[1];
@@ -2031,29 +2221,40 @@ function renderCartoes(main, ano, mes) {
 }
 
 /* ========================================================= classificar */
-function cardSemClasses() {
-  return `<section class="card destaque-acao">
+function cardSemClasses(tipo = 'despesa') {
+  return tipo === 'receita'
+    ? `<section class="card destaque-acao">
+    <h2>Crie as categorias de receita</h2>
+    <p class="sub">Dizem <b>de onde veio</b> o dinheiro: Vendas / clientes, Salário, Rendimentos… Comece com as sugeridas e ajuste depois em Ajustes.</p>
+    <div class="acoes"><button class="btn primario" data-a="sugeridas" data-tipo="receita">Criar categorias de receita sugeridas</button><a class="btn" href="#/ajustes">Criar as minhas</a></div>
+  </section>`
+    : `<section class="card destaque-acao">
     <h2>Crie as categorias de gasto</h2>
     <p class="sub">Categorias dizem <b>com o quê</b> o dinheiro foi gasto (Funcionários, Assinaturas, Telefone…), independente da conta.
       Comece com as sugeridas e ajuste depois em Ajustes.</p>
-    <div class="acoes"><button class="btn primario" data-a="sugeridas">Criar categorias sugeridas</button><a class="btn" href="#/ajustes">Criar as minhas</a></div>
+    <div class="acoes"><button class="btn primario" data-a="sugeridas" data-tipo="despesa">Criar categorias sugeridas</button><a class="btn" href="#/ajustes">Criar as minhas</a></div>
   </section>`;
 }
 function bindSemClasses(main) {
-  main.querySelector('[data-a="sugeridas"]')?.addEventListener('click', async (e) => {
-    e.target.disabled = true;
-    try { await criarClassesSugeridas(); toast('Categorias criadas.'); render(); } catch (ex) { toast(ex.message, 'erro'); e.target.disabled = false; }
-  });
+  main.querySelectorAll('[data-a="sugeridas"]').forEach((b) => b.addEventListener('click', async (e) => {
+    e.currentTarget.disabled = true;
+    try { await criarClassesSugeridas(b.dataset.tipo || 'despesa'); toast('Categorias criadas.'); render(); } catch (ex) { toast(ex.message, 'erro'); b.disabled = false; }
+  }));
 }
 
 function renderClassificar(main, ano, mes) {
   const prefixo = `${ano}-${pad2(mes)}`;
-  const despesasMes = S.data.lancamentos.filter((l) => String(l.data).startsWith(prefixo) && l.destino === 'despesa');
-  const pend = semClasse(despesasMes);
+  // Duas filas: gastos sem categoria e receitas sem categoria
+  const tipo = S.classTipo === 'receita' ? 'receita' : 'despesa';
+  const pendentesDe = tipo === 'receita' ? receitasSemClasse : semClasse;
+  const nomeItem = (n) => (tipo === 'receita' ? (n === 1 ? 'receita' : 'receitas') : (n === 1 ? 'gasto' : 'gastos'));
+  const despesasMes = S.data.lancamentos.filter((l) => String(l.data).startsWith(prefixo) && l.destino === (tipo === 'receita' ? 'receita' : 'despesa'));
+  const pend = pendentesDe(despesasMes);
   const feitos = despesasMes.length - pend.length;
   const pct = despesasMes.length ? Math.round((feitos / despesasMes.length) * 100) : 0;
+  const pendOutroTipo = (tipo === 'receita' ? semClasse : receitasSemClasse)(S.data.lancamentos.filter((l) => String(l.data).startsWith(prefixo))).length;
   const outros = new Map();
-  for (const l of semClasse(S.data.lancamentos)) {
+  for (const l of pendentesDe(S.data.lancamentos)) {
     const k = l.data.slice(0, 7);
     if (k !== prefixo) outros.set(k, (outros.get(k) || 0) + 1);
   }
@@ -2069,38 +2270,40 @@ function renderClassificar(main, ano, mes) {
   const grupos = [...mapa.entries()]
     .map(([base, ls]) => ({ base, ls, total: ls.reduce((s, l) => s + l.valor, 0) }))
     .sort((a, b) => b.total - a.total);
-  const cl = classes().filter((c) => c.ativo !== false);
+  const cl = arvoreClasses(tipo);
   const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
 
   main.innerHTML = `
     ${cabecalhoMes(ano, mes, '#/classificar', `
+      <div class="seg" role="group" aria-label="Gastos ou receitas">${Object.entries(TIPOS_CLASSE).map(([k, t]) => `<button data-tipo-classe="${k}" class="${tipo === k ? 'ativo' : ''}" aria-pressed="${tipo === k}">${t}</button>`).join('')}</div>
       <button class="btn" data-a="aplicar-regras" title="Usa as regras salvas nos lançamentos ainda sem categoria">Aplicar regras</button>
       <a class="btn" href="#/categorias/${ano}/${mes}">Ver categorias</a>`)}
 
-    ${!cl.length ? cardSemClasses() : ''}
+    ${!cl.length ? cardSemClasses(tipo) : ''}
 
     ${blocoConferencia(problemas)}
+    ${pendOutroTipo ? `<p class="hint">Também há ${pendOutroTipo} ${tipo === 'receita' ? (pendOutroTipo === 1 ? 'gasto' : 'gastos') : (pendOutroTipo === 1 ? 'receita' : 'receitas')} sem categoria neste mês. <a href="#" data-tipo-classe="${tipo === 'receita' ? 'despesa' : 'receita'}">Ver →</a></p>` : ''}
 
     <section class="card progresso-card">
       <div class="progresso-topo">
-        <div><strong>${feitos} de ${despesasMes.length}</strong> gastos de ${MESES[mes - 1].toLowerCase()} classificados</div>
+        <div><strong>${feitos} de ${despesasMes.length}</strong> ${nomeItem(despesasMes.length)} de ${MESES[mes - 1].toLowerCase()} ${tipo === 'receita' ? 'classificadas' : 'classificados'}</div>
         <span class="pct">${pct}%</span>
       </div>
       <div class="progresso grande"><span style="width:${pct}%"></span></div>
-      ${outros.size ? `<p class="hint">Outros meses com gastos sem categoria:
+      ${outros.size ? `<p class="hint">Outros meses com ${nomeItem(2)} sem categoria:
         ${[...outros.entries()].sort().map(([k, n]) => { const [a, m] = k.split('-').map(Number); return `<a href="#/classificar/${a}/${m}">${MESES_CURTO[m - 1]}/${String(a).slice(2)} (${n})</a>`; }).join(' · ')}</p>` : ''}
     </section>
 
     ${!despesasMes.length ? `
       <section class="card vazio">
-        <h2>Nenhum gasto lançado em ${MESES[mes - 1].toLowerCase()}</h2>
+        <h2>${tipo === 'receita' ? 'Nenhuma receita lançada' : 'Nenhum gasto lançado'} em ${MESES[mes - 1].toLowerCase()}</h2>
         <p>Importe os extratos das contas e cartões na tela Transações e volte aqui para classificar.</p>
         <div class="acoes"><a class="btn primario" href="#/lancamentos/${ano}/${mes}">Ir para Transações</a></div>
       </section>`
     : !pend.length ? `
       <section class="card vazio pronto">
         <h2>Tudo classificado ✓</h2>
-        <p>Todos os gastos de ${MESES[mes - 1].toLowerCase()} têm categoria.</p>
+        <p>${tipo === 'receita' ? 'Todas as receitas' : 'Todos os gastos'} de ${MESES[mes - 1].toLowerCase()} têm categoria.</p>
         <div class="acoes"><a class="btn primario" href="#/categorias/${ano}/${mes}">Ver quanto foi para cada categoria</a></div>
       </section>`
     : `<div class="grupos">${grupos.map((g, gi) => `
@@ -2118,7 +2321,7 @@ function renderClassificar(main, ano, mes) {
           </div>
         </div>
         <div class="chips">
-          ${cl.map((c) => `<button type="button" class="chip" data-classe="${c.id}" style="--cor:${c.cor}"><i></i>${esc(c.nome)}${c.escopo_padrao ? `<small>${LADO[c.escopo_padrao]}</small>` : ''}</button>`).join('')}
+          ${cl.map((c) => `<button type="button" class="chip ${c.nivel ? 'sub' : ''}" data-classe="${c.id}" style="--cor:${c.cor}" title="${esc(nomeClasse(c))}"><i></i>${c.nivel ? '↳ ' : ''}${esc(c.nome)}${c.escopo_padrao ? `<small>${LADO[c.escopo_padrao]}</small>` : ''}</button>`).join('')}
         </div>
         <div class="grupo-pe">
           <label class="check-linha"><input type="checkbox" data-lembrar checked> Lembrar: sempre que a descrição tiver
@@ -2131,12 +2334,15 @@ function renderClassificar(main, ano, mes) {
 
   bindSemClasses(main);
   bindConferencia(main, problemas);
+  main.querySelectorAll('[data-tipo-classe]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); S.classTipo = b.dataset.tipoClasse; render(); }));
   main.querySelector('[data-a="aplicar-regras"]').addEventListener('click', async () => {
-    const alvo = semClasse(S.data.lancamentos).map((l) => ({ l, r: regraPara(l.descricao, S.data.regras) })).filter((x) => x.r);
-    if (!alvo.length) { toast('Nenhum gasto sem categoria combina com as regras salvas.'); return; }
+    // só regras de categorias do tipo certo (gasto para despesa, receita para receita)
+    const regrasTipo = S.data.regras.filter((r) => classePorId(r.classe_id) && tipoDaClasse(classePorId(r.classe_id)) === tipo);
+    const alvo = pendentesDe(S.data.lancamentos).map((l) => ({ l, r: regraPara(l.descricao, regrasTipo) })).filter((x) => x.r);
+    if (!alvo.length) { toast(`Nenhum${tipo === 'receita' ? 'a receita' : ' gasto'} sem categoria combina com as regras salvas.`); return; }
     try {
       for (const { l, r } of alvo) await classificar([l.id], r.classe_id, r.escopo || null, null);
-      toast(`${alvo.length} gastos classificados pelas regras.`);
+      toast(`${alvo.length} ${nomeItem(alvo.length)} classificados pelas regras.`);
       render();
     } catch (e) { toast(e.message, 'erro'); }
   });
@@ -2154,7 +2360,7 @@ function renderClassificar(main, ano, mes) {
       try {
         await classificar(marcados, b.dataset.classe, lado, lembrar ? texto : null);
         const c = classePorId(b.dataset.classe);
-        toast(`${marcados.length} → ${c?.nome}${lado ? ` · ${LADO[lado]}` : c?.escopo_padrao ? ` · ${LADO[c.escopo_padrao]}` : ''}${lembrar ? ' · regra salva' : ''}`);
+        toast(`${marcados.length} → ${nomeClasse(c)}${lado ? ` · ${LADO[lado]}` : c?.escopo_padrao ? ` · ${LADO[c.escopo_padrao]}` : ''}${lembrar ? ' · regra salva' : ''}`);
         render();
       } catch (e) { card.classList.remove('saindo'); toast(e.message, 'erro'); }
     }));
@@ -2164,9 +2370,12 @@ function renderClassificar(main, ano, mes) {
 /* ========================================================== categorias */
 function renderCategorias(main, ano, mes) {
   const porAno = !mes;
-  const fc = S.filtroCat || (S.filtroCat = { escopo: 'todos', conta: '' });
+  const fc = S.filtroCat || (S.filtroCat = { escopo: 'todos', conta: '', tipo: 'despesa' });
+  const tipo = fc.tipo === 'receita' ? 'receita' : 'despesa';
+  const ehDoTipo = (l) => (tipo === 'receita' ? l.destino === 'receita' || l.destino === 'rendimento' : l.destino === 'despesa');
+  const palavra = (n) => (tipo === 'receita' ? (n === 1 ? 'receita' : 'receitas') : (n === 1 ? 'gasto' : 'gastos'));
   const prefixo = porAno ? `${ano}-` : `${ano}-${pad2(mes)}`;
-  const doPeriodo = S.data.lancamentos.filter((l) => l.destino === 'despesa' && String(l.data).startsWith(prefixo));
+  const doPeriodo = S.data.lancamentos.filter((l) => ehDoTipo(l) && String(l.data).startsWith(prefixo));
   const despesas = doPeriodo
     .filter((l) => fc.escopo === 'todos' || l.escopo === fc.escopo)
     .filter((l) => !fc.conta || l.categoria_id === fc.conta);
@@ -2174,21 +2383,35 @@ function renderCategorias(main, ano, mes) {
   const soma = (f) => doPeriodo.filter((l) => !fc.conta || l.categoria_id === fc.conta).filter(f).reduce((s, l) => s + l.valor, 0);
   const pessoal = soma((l) => l.escopo === 'pessoal');
   const empresa = soma((l) => l.escopo === 'empresa');
-  const semCat = semClasse(despesas);
+  const semCat = despesas.filter((l) => !l.classe_id);
 
+  // Agrupa pela categoria PRINCIPAL; as subcategorias aparecem dentro dela
   const grupos = new Map();
   for (const l of despesas) {
-    const k = l.classe_id || '';
+    const k = raizClasse(classePorId(l.classe_id))?.id || '';
     if (!grupos.has(k)) grupos.set(k, []);
     grupos.get(k).push(l);
   }
   const linhas = [...grupos.entries()].map(([id, ls]) => {
     const c = classePorId(id);
-    return { id, nome: c?.nome || 'Sem categoria', cor: c?.cor || '#cbd5e1', ls, total: ls.reduce((s, l) => s + l.valor, 0) };
+    // subtotais por subcategoria (o que foi direto na principal fica como "geral")
+    const subs = new Map();
+    for (const l of ls) {
+      const sc = classePorId(l.classe_id);
+      const sk = sc && sc.pai_id ? sc.id : '';
+      subs.set(sk, (subs.get(sk) || 0) + l.valor);
+    }
+    const subLista = [...subs.entries()].filter(() => subs.size > 1 || !subs.has(''))
+      .map(([sid, v]) => ({ nome: sid ? classePorId(sid).nome : `${c?.nome || ''} (geral)`, cor: sid ? classePorId(sid).cor : c?.cor, v }))
+      .sort((a, b) => b.v - a.v);
+    return { id, nome: c?.nome || 'Sem categoria', cor: c?.cor || '#cbd5e1', ls, subLista, total: ls.reduce((s, l) => s + l.valor, 0) };
   }).sort((a, b) => (a.id === '') - (b.id === '') || b.total - a.total);
   const maior = Math.max(1, ...linhas.map((x) => x.total));
   const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
+  const temClasses = S.data.classes.some((c) => tipoDaClasse(c) === tipo);
 
+  const seletorTipo = `<div class="seg" role="group" aria-label="Gastos ou receitas">${Object.entries(TIPOS_CLASSE).map(([k, t]) =>
+    `<button data-tipo-cat="${k}" class="${tipo === k ? 'ativo' : ''}" aria-pressed="${tipo === k}">${t}</button>`).join('')}</div>`;
   const cab = porAno
     ? `<div class="barra-pagina">
         <div class="barra-esq">
@@ -2196,9 +2419,9 @@ function renderCategorias(main, ano, mes) {
           <a class="btn icone discreto" href="#/categorias/${ano + 1}" aria-label="Próximo ano">›</a>
           <span class="titulo-mes">${ano}</span>
         </div>
-        <div class="barra-dir"><div class="abas"><a href="#/categorias/${ano}/${new Date().getMonth() + 1}">Mês</a><a class="ativo" href="#/categorias/${ano}">Ano inteiro</a></div></div>
+        <div class="barra-dir">${seletorTipo}<div class="abas"><a href="#/categorias/${ano}/${new Date().getMonth() + 1}">Mês</a><a class="ativo" href="#/categorias/${ano}">Ano inteiro</a></div></div>
       </div>`
-    : cabecalhoMes(ano, mes, '#/categorias', `<div class="abas"><a class="ativo" href="#/categorias/${ano}/${mes}">Mês</a><a href="#/categorias/${ano}">Ano inteiro</a></div>`);
+    : cabecalhoMes(ano, mes, '#/categorias', `${seletorTipo}<div class="abas"><a class="ativo" href="#/categorias/${ano}/${mes}">Mês</a><a href="#/categorias/${ano}">Ano inteiro</a></div>`);
 
   // Tabela categoria × mês (só no ano)
   const tabelaAno = porAno && linhas.length ? `
@@ -2217,11 +2440,11 @@ function renderCategorias(main, ano, mes) {
     ${cab}
 
     <section class="mini-kpis">
-      <div class="card"><span>Gastos ${fc.escopo !== 'todos' ? `(${LADO[fc.escopo].toLowerCase()})` : ''}</span><strong>${fmtBRL(total)}</strong></div>
+      <div class="card"><span>${tipo === 'receita' ? 'Receitas' : 'Gastos'} ${fc.escopo !== 'todos' ? `(${LADO[fc.escopo].toLowerCase()})` : ''}</span><strong class="${tipo === 'receita' ? 'pos' : ''}">${fmtBRL(total)}</strong></div>
       <div class="card"><span>Pessoal</span><strong>${fmtBRL(pessoal)}</strong></div>
       <div class="card"><span>Empresa</span><strong>${fmtBRL(empresa)}</strong></div>
       <div class="card"><span>Sem categoria</span><strong class="${semCat.length ? 'neg' : ''}">${semCat.length}</strong>
-        ${semCat.length && !porAno ? `<a href="#/classificar/${ano}/${mes}">Classificar →</a>` : ''}</div>
+        ${semCat.length && !porAno ? `<a href="#/classificar/${ano}/${mes}" data-ir-classificar>Classificar →</a>` : ''}</div>
     </section>
 
     <section class="card filtros-lanc">
@@ -2235,11 +2458,11 @@ function renderCategorias(main, ano, mes) {
       </select>
     </section>
 
-    ${!S.data.classes.length ? cardSemClasses() : ''}
+    ${!temClasses ? cardSemClasses(tipo) : ''}
 
-    ${!despesas.length ? `<section class="card vazio"><h2>Nenhum gasto ${porAno ? `em ${ano}` : `em ${MESES[mes - 1].toLowerCase()}`}</h2>
-      <p>As categorias usam os gastos da tela Transações (lançados à mão ou importados do extrato).</p>
-      <div class="acoes"><a class="btn primario" href="#/lancamentos/${ano}/${mes || new Date().getMonth() + 1}">Ir para Transações</a></div></section>`
+    ${!despesas.length ? `<section class="card vazio"><h2>${tipo === 'receita' ? 'Nenhuma receita' : 'Nenhum gasto'} ${porAno ? `em ${ano}` : `em ${MESES[mes - 1].toLowerCase()}`}</h2>
+      <p>As categorias usam as transações (lançadas à mão ou importadas do extrato).</p>
+      <div class="acoes"><a class="btn primario" href="#/lancamentos/${ano}/${mes || new Date().getMonth() + 1}/${tipo === 'receita' ? 'receitas' : 'despesas'}">Ir para Transações</a></div></section>`
     : `<div class="cat-grid">
       <section class="card">
         <h2>Divisão</h2>
@@ -2251,15 +2474,17 @@ function renderCategorias(main, ano, mes) {
           <details class="cat-item">
             <summary>
               <span class="dot" style="background:${x.cor}"></span>
-              <span class="cat-nome">${esc(x.nome)}<small>${x.ls.length} ${x.ls.length === 1 ? 'gasto' : 'gastos'}</small></span>
+              <span class="cat-nome">${esc(x.nome)}<small>${x.ls.length} ${palavra(x.ls.length)}${(() => { const n = x.subLista.filter((s) => !s.nome.endsWith('(geral)')).length; return n ? ` · ${n} ${n === 1 ? 'subcategoria' : 'subcategorias'}` : ''; })()}</small></span>
               <span class="cat-barra"><i style="width:${(x.total / maior) * 100}%;background:${x.cor}"></i></span>
               <span class="cat-valor"><b>${fmtBRL(x.total)}</b><small>${total ? Math.round((x.total / total) * 100) : 0}%</small></span>
             </summary>
+            ${x.subLista.length ? `<div class="subcats">${x.subLista.map((s) => `<div class="subcat"><span class="dot" style="background:${s.cor}"></span><span>${esc(s.nome)}</span>
+              <span class="cat-barra"><i style="width:${(s.v / x.total) * 100}%;background:${s.cor}"></i></span><b>${fmtBRL(s.v)}</b></div>`).join('')}</div>` : ''}
             <div class="cat-lista">
               ${[...x.ls].sort((a, b) => b.data.localeCompare(a.data)).map((l) => `
                 <button class="lanc" data-id="${l.id}">
                   <span class="lanc-txt"><b>${esc(l.descricao)}</b>
-                    <small>${fmtDia(l.data)} · ${esc(l.conta || catPorId.get(l.categoria_id)?.nome || '')} · <span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo]}</span></small></span>
+                    <small>${fmtDia(l.data)} · ${classePorId(l.classe_id)?.pai_id ? esc(classePorId(l.classe_id).nome) + ' · ' : ''}${esc(l.conta || catPorId.get(l.categoria_id)?.nome || '')} · <span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo]}</span></small></span>
                   <span class="lanc-valor">${fmtBRL(l.valor)}</span>
                 </button>`).join('')}
             </div>
@@ -2269,6 +2494,8 @@ function renderCategorias(main, ano, mes) {
     ${tabelaAno}`;
 
   bindSemClasses(main);
+  main.querySelectorAll('[data-tipo-cat]').forEach((b) => b.addEventListener('click', () => { fc.tipo = b.dataset.tipoCat; render(); }));
+  main.querySelector('[data-ir-classificar]')?.addEventListener('click', () => { S.classTipo = tipo; });
   main.querySelectorAll('[data-escopo]').forEach((b) => b.addEventListener('click', () => { fc.escopo = b.dataset.escopo; render(); }));
   main.querySelector('[data-f="conta"]').addEventListener('change', (e) => { fc.conta = e.target.value; render(); });
   main.querySelectorAll('.cat-lista .lanc').forEach((b) => b.addEventListener('click', () => {
@@ -3060,7 +3287,8 @@ function renderAjuda(main) {
           ${ehControle() ? `<div><dt>${ICON.lista} Transações</dt><dd>Abas Despesas, Receitas, Transferências (de uma conta para outra) e Extrato (tudo do mês, dia a dia). Também é onde se importa o extrato do banco.</dd></div>
           <div><dt>${ICON.calendario} Calendário</dt><dd>O mês em forma de calendário: receitas em verde, despesas na conta em vermelho, compras no cartão em azul, transferências em amarelo e os dias de fechamento/vencimento da fatura. Toque num dia para ver o que aconteceu.</dd></div>
           <div><dt>${ICON.classificar} Classificar</dt><dd>Os gastos sem categoria, agrupados por descrição. Um clique na categoria classifica o grupo e cria a regra para os próximos meses.</dd></div>
-          <div><dt>${ICON.categorias} Categorias</dt><dd>Quanto foi para cada categoria (Funcionários, Assinaturas…) no mês ou no ano, de todas as contas juntas, com filtro pessoal/empresa.</dd></div>` : ''}
+          <div><dt>${ICON.categorias} Categorias</dt><dd>Quanto foi para cada categoria de gasto (Funcionários, Assinaturas…) e de onde veio cada receita (Vendas, Salário…), no mês ou no ano, de todas as contas juntas. Subcategorias (ex.: Mercado › Hortifruti) aparecem dentro da principal.</dd></div>
+          <div><dt>${ICON.cartao} Cartões</dt><dd>A fatura que vence no mês (pelas datas de fechamento e vencimento de cada cartão), se já foi paga e quanto do limite ainda está livre.</dd></div>` : ''}
           <div><dt>${ICON.ano} Ano · Resumo</dt><dd>O ano inteiro: total que entrou e saiu, divisão por cartão/categoria, melhores e piores meses, investimentos e evolução do saldo.</dd></div>
           <div><dt>${ICON.ano} Ano · Planilha</dt><dd>Igual à aba do ano no Excel: um mês por linha e as informações gerais ao lado. Toque num mês para editar.</dd></div>
           <div><dt>${ICON.geral} Todos os anos</dt><dd>Soma de todos os anos, com filtro por período e por cartão/categoria.</dd></div>
@@ -3190,35 +3418,45 @@ function renderAjustes(main) {
     </section>
 
     ${ehControle() ? `<section class="card" id="classes">
-      <h2>Categorias de gasto</h2>
-      <p class="sub"><b>Com o que foi gasto</b>, de qualquer conta: Funcionários, Assinaturas, Telefone… O <b>lado padrão</b> decide sozinho se o gasto é
-        pessoal ou da empresa ao classificar (ex.: Funcionários = Empresa). "Depende" mantém o que estiver no lançamento.</p>
-      ${!S.data.classes.length ? '<div class="acoes"><button class="btn primario" data-a="sugeridas">Criar categorias sugeridas</button></div>' : ''}
-      <div class="lista-cat">
-        ${classes().map((cl) => {
-          const usos = S.data.lancamentos.filter((l) => l.classe_id === cl.id).length;
-          return `
-          <div class="cat classe ${cl.ativo === false ? 'inativa' : ''}" data-classe-id="${cl.id}">
-            <input type="color" name="cor" value="${esc(cl.cor)}" aria-label="Cor">
-            <input name="nome" value="${esc(cl.nome)}" aria-label="Nome">
-            <select name="escopo_padrao" aria-label="Lado padrão">
-              <option value="" ${!cl.escopo_padrao ? 'selected' : ''}>Depende</option>
-              <option value="pessoal" ${cl.escopo_padrao === 'pessoal' ? 'selected' : ''}>Pessoal</option>
-              <option value="empresa" ${cl.escopo_padrao === 'empresa' ? 'selected' : ''}>Empresa</option>
-            </select>
-            <div class="cat-acoes">
-              <span class="sub">${usos} ${usos === 1 ? 'uso' : 'usos'}</span>
-              ${usos ? `<button class="btn" data-a="arquivar">${cl.ativo === false ? 'Reativar' : 'Arquivar'}</button>` : '<button class="btn perigo" data-a="excluir">Excluir</button>'}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-      <form class="nova-classe">
-        <input type="color" name="cor" value="#0d9488" aria-label="Cor">
-        <input name="nome" placeholder="Nova categoria (ex.: Contador, Frete)" required>
-        <select name="escopo_padrao"><option value="">Depende</option><option value="pessoal">Pessoal</option><option value="empresa">Empresa</option></select>
-        <button class="btn primario">Adicionar</button>
-      </form>
+      <h2>Categorias</h2>
+      <p class="sub"><b>Gastos</b>: com o que o dinheiro foi gasto (Funcionários, Assinaturas…). <b>Receitas</b>: de onde ele veio (Vendas, Salário…).
+        Valem para qualquer conta. O <b>lado padrão</b> decide sozinho se é pessoal ou da empresa ao classificar ("Depende" mantém o do lançamento).
+        Para criar uma <b>subcategoria</b> (ex.: Mercado › Hortifruti), escolha a categoria principal em "Dentro de".</p>
+      ${['despesa', 'receita'].map((tipo) => {
+        const arvore = arvoreClasses(tipo, { todas: true });
+        const raizes = arvore.filter((c) => !c.nivel);
+        const opcoesPai = (cl) => `<option value="">— principal —</option>${raizes.filter((r) => r.id !== cl?.id).map((r) => `<option value="${r.id}" ${cl?.pai_id === r.id ? 'selected' : ''}>${esc(r.nome)}</option>`).join('')}`;
+        return `<h3 class="sub-secao">${tipo === 'receita' ? 'Categorias de receita' : 'Categorias de gasto'}</h3>
+        ${!arvore.length ? `<div class="acoes"><button class="btn primario" data-a="sugeridas" data-tipo="${tipo}">Criar ${tipo === 'receita' ? 'categorias de receita' : 'categorias de gasto'} sugeridas</button></div>` : ''}
+        <div class="lista-cat">
+          ${arvore.map((cl) => {
+            const usos = S.data.lancamentos.filter((l) => l.classe_id === cl.id).length;
+            const temFilhas = S.data.classes.some((x) => x.pai_id === cl.id);
+            return `
+            <div class="cat classe ${cl.nivel ? 'subclasse' : ''} ${cl.ativo === false ? 'inativa' : ''}" data-classe-id="${cl.id}">
+              <input type="color" name="cor" value="${esc(cl.cor)}" aria-label="Cor">
+              <input name="nome" value="${esc(cl.nome)}" aria-label="Nome">
+              <select name="pai_id" aria-label="Dentro de" title="Dentro de" ${temFilhas ? 'disabled' : ''}>${opcoesPai(cl)}</select>
+              <select name="escopo_padrao" aria-label="Lado padrão">
+                <option value="" ${!cl.escopo_padrao ? 'selected' : ''}>Depende</option>
+                <option value="pessoal" ${cl.escopo_padrao === 'pessoal' ? 'selected' : ''}>Pessoal</option>
+                <option value="empresa" ${cl.escopo_padrao === 'empresa' ? 'selected' : ''}>Empresa</option>
+              </select>
+              <div class="cat-acoes">
+                <span class="sub">${usos} ${usos === 1 ? 'uso' : 'usos'}</span>
+                ${usos ? `<button class="btn" data-a="arquivar">${cl.ativo === false ? 'Reativar' : 'Arquivar'}</button>` : '<button class="btn perigo" data-a="excluir">Excluir</button>'}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+        <form class="nova-classe" data-tipo="${tipo}">
+          <input type="color" name="cor" value="${tipo === 'receita' ? '#10b981' : '#0d9488'}" aria-label="Cor">
+          <input name="nome" placeholder="${tipo === 'receita' ? 'Nova categoria de receita (ex.: Comissões)' : 'Nova categoria (ex.: Contador, Frete)'}" required>
+          <select name="pai_id" aria-label="Dentro de">${opcoesPai(null)}</select>
+          <select name="escopo_padrao" aria-label="Lado padrão"><option value="">Depende</option><option value="pessoal">Pessoal</option><option value="empresa">Empresa</option></select>
+          <button class="btn primario">Adicionar</button>
+        </form>`;
+      }).join('')}
     </section>
 
     <section class="card" id="regras">
@@ -3232,7 +3470,7 @@ function renderAjustes(main) {
             <span class="sub">contém</span>
             <input name="texto" value="${esc(r.texto)}" aria-label="Texto">
             <span class="sub">→</span>
-            <select name="classe_id" aria-label="Categoria">${classes().map((cl) => `<option value="${cl.id}" ${cl.id === r.classe_id ? 'selected' : ''}>${esc(cl.nome)}</option>`).join('')}</select>
+            <select name="classe_id" aria-label="Categoria">${Object.entries(TIPOS_CLASSE).map(([t, nomeT]) => `<optgroup label="${nomeT}">${arvoreClasses(t, { todas: true }).map((cl) => `<option value="${cl.id}" ${cl.id === r.classe_id ? 'selected' : ''}>${cl.nivel ? '↳ ' : ''}${esc(cl.nome)}</option>`).join('')}</optgroup>`).join('')}</select>
             <select name="escopo" aria-label="Lado">
               <option value="" ${!r.escopo ? 'selected' : ''}>Lado da categoria</option>
               <option value="pessoal" ${r.escopo === 'pessoal' ? 'selected' : ''}>Pessoal</option>
@@ -3375,29 +3613,32 @@ function renderAjustes(main) {
     });
     row.querySelector('[name="cor"]').addEventListener('change', (e) => salvar({ cor: e.target.value }, 'Cor atualizada.'));
     row.querySelector('[name="escopo_padrao"]').addEventListener('change', (e) => salvar({ escopo_padrao: e.target.value || null }, 'Lado padrão atualizado.'));
+    row.querySelector('[name="pai_id"]').addEventListener('change', async (e) => { await salvar({ pai_id: e.target.value || null }, e.target.value ? 'Agora é subcategoria.' : 'Agora é categoria principal.'); render(); });
     row.querySelector('[data-a="arquivar"]')?.addEventListener('click', async () => { await salvar({ ativo: cl.ativo === false }); render(); });
     row.querySelector('[data-a="excluir"]')?.addEventListener('click', async () => {
       if (!confirm(`Excluir a categoria "${cl.nome}"? As regras dela também serão apagadas.`)) return;
       try {
         await S.store.deleteClasse(cl.id);
         S.data.classes = S.data.classes.filter((x) => x.id !== cl.id);
+        S.data.classes.forEach((x) => { if (x.pai_id === cl.id) x.pai_id = null; }); // subcategorias viram principais
         S.data.regras = S.data.regras.filter((r) => r.classe_id !== cl.id);
         render();
       } catch (e) { toast(e.message, 'erro'); }
     });
   });
-  main.querySelector('.nova-classe')?.addEventListener('submit', async (e) => {
+  main.querySelectorAll('.nova-classe').forEach((form) => form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
       S.data.classes.push(await S.store.saveClasse({
         perfil_id: S.perfilId, nome: f.nome.value.trim(), cor: f.cor.value, escopo_padrao: f.escopo_padrao.value || null,
+        tipo: f.dataset.tipo, pai_id: f.pai_id.value || null,
         ordem: S.data.classes.length + 1, ativo: true,
       }));
       toast('Categoria adicionada.');
       render();
     } catch (ex) { toast(ex.message, 'erro'); }
-  });
+  }));
 
   // --- regras
   main.querySelectorAll('[data-regra-id]').forEach((row) => {
