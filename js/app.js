@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117191936';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117191936';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117191936';
-import { lerPlanilha } from './importer.js?v=20261117191936';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117191936';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117191936';
-import { ILUSTRA } from './ilustra.js?v=20261117191936';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117192732';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117192732';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117192732';
+import { lerPlanilha } from './importer.js?v=20261117192732';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117192732';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117192732';
+import { ILUSTRA } from './ilustra.js?v=20261117192732';
 
 const app = document.getElementById('app');
 const S = {
@@ -526,7 +526,7 @@ function shell(r) {
   // Contador do menu (modo controle): gastos sem categoria + itens para conferir
   const pendentes = controle && S.user && S.autorizado !== false ? semClasse(S.data.lancamentos).length + conferir().length : 0;
   const email = S.user?.email || '';
-  const marca = `<div class="marca"><button type="button" class="menu-alternar" data-a="menu-compacto" aria-label="Recolher ou abrir o menu" title="Recolher menu">${ICON.menu}</button><img src="icons/icon.svg" alt="" width="30" height="30">
+  const marca = `<div class="marca"><button type="button" class="menu-alternar" data-a="menu-compacto" aria-label="Recolher ou abrir o menu" title="Recolher menu">${ICON.menu}</button><img src="icons/icon.svg?v=mqs" alt="" width="38" height="38">
     <span>Finanças Marques<small>Modo ${MODOS[modo()].nome.toLowerCase()}</small></span></div>`;
   // Menu como no Minhas Finanças: o dia a dia em cima, "Analisar" e "Configurar" em grupos
   const menu = controle
@@ -620,7 +620,7 @@ function renderLogin(modo = 'entrar') {
   app.innerHTML = `
   <div class="login">
     <form class="card login-card">
-      <div class="marca grande"><img src="icons/icon.svg" alt="" width="40" height="40"><span>Finanças Marques</span></div>
+      <div class="marca grande"><img src="icons/icon.svg?v=mqs" alt="" width="56" height="56"><span>Finanças Marques</span></div>
       <h1>${titulo}</h1>
       <label>E-mail<input type="email" name="email" autocomplete="email" required></label>
       ${modo !== 'senha' ? `<label>Senha<input type="password" name="senha" autocomplete="${modo === 'criar' ? 'new-password' : 'current-password'}" minlength="6" required></label>` : ''}
@@ -670,7 +670,7 @@ function renderSemAcesso() {
   app.innerHTML = `
   <div class="login">
     <div class="card login-card">
-      <div class="marca grande"><img src="icons/icon.svg" alt="" width="40" height="40"><span>Finanças Marques</span></div>
+      <div class="marca grande"><img src="icons/icon.svg?v=mqs" alt="" width="56" height="56"><span>Finanças Marques</span></div>
       <h1>Conta sem acesso</h1>
       <p class="sub">Você entrou como <b>${esc(S.user.email || '')}</b>, mas esta conta ainda não foi liberada para o site de finanças.</p>
       <p class="sub">Código da conta (para liberar o acesso):</p>

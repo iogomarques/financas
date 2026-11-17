@@ -1,1 +1,85 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0f766e"/><rect x="14" y="34" width="8" height="16" rx="2" fill="#a7f3d0"/><rect x="28" y="24" width="8" height="26" rx="2" fill="#ffffff"/><rect x="42" y="14" width="8" height="36" rx="2" fill="#a7f3d0"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Finanças Marques</title>
+  <defs>
+    <radialGradient id="saco" cx="38%" cy="38%" r="70%">
+      <stop offset="0" stop-color="#fff0a8"/>
+      <stop offset=".45" stop-color="#f5c542"/>
+      <stop offset="1" stop-color="#c8871a"/>
+    </radialGradient>
+    <linearGradient id="topo" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe27a"/>
+      <stop offset="1" stop-color="#d79a22"/>
+    </linearGradient>
+    <linearGradient id="corda" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9b44a"/>
+      <stop offset="1" stop-color="#a8701a"/>
+    </linearGradient>
+    <linearGradient id="moeda" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe066"/>
+      <stop offset="1" stop-color="#d49a16"/>
+    </linearGradient>
+  </defs>
+
+  <!-- brilhos -->
+  <g fill="#f4b81f">
+    <path d="M70 196l7 20 20 7-20 7-7 20-7-20-20-7 20-7z"/>
+    <path d="M446 250l5 15 15 5-15 5-5 15-5-15-15-5 15-5z"/>
+  </g>
+
+  <!-- moedas atrás do saco -->
+  <!-- pilhas: cada moeda é uma "fatia" (lateral + topo oval), de baixo para cima -->
+  <g stroke="#5a3a0c" stroke-width="4.5">
+    <g id="pilha-esq">
+      <path d="M40 440 v-14 a42 13 0 0 1 84 0 v14 a42 13 0 0 1 -84 0z" fill="#d9a21b"/>
+      <path d="M40 420 v-14 a42 13 0 0 1 84 0 v14 a42 13 0 0 1 -84 0z" fill="#e2ad25"/>
+      <path d="M40 400 v-14 a42 13 0 0 1 84 0 v14 a42 13 0 0 1 -84 0z" fill="#d9a21b"/>
+      <path d="M40 380 v-14 a42 13 0 0 1 84 0 v14 a42 13 0 0 1 -84 0z" fill="#e2ad25"/>
+      <ellipse cx="82" cy="366" rx="42" ry="13" fill="url(#moeda)"/>
+    </g>
+    <path d="M388 446 v-14 a42 13 0 0 1 84 0 v14 a42 13 0 0 1 -84 0z" fill="#d9a21b"/>
+    <path d="M388 426 v-14 a42 13 0 0 1 84 0 v14 a42 13 0 0 1 -84 0z" fill="#e2ad25"/>
+    <path d="M388 406 v-14 a42 13 0 0 1 84 0 v14 a42 13 0 0 1 -84 0z" fill="#d9a21b"/>
+    <ellipse cx="430" cy="392" rx="42" ry="13" fill="url(#moeda)"/>
+  </g>
+
+  <!-- corpo do saco -->
+  <path d="M200 206 C118 250 64 338 90 414 C110 468 186 486 256 486 C326 486 402 468 422 414 C448 338 394 250 312 206 Z"
+        fill="url(#saco)" stroke="#3b2610" stroke-width="10" stroke-linejoin="round"/>
+  <!-- reflexo -->
+  <path d="M150 300 C140 340 140 380 160 410" fill="none" stroke="#fff6cf" stroke-width="12" stroke-linecap="round" opacity=".55"/>
+
+  <!-- boca franzida do saco -->
+  <path d="M206 200 C186 160 156 120 138 76 C170 92 194 66 222 80 C242 58 270 58 290 80 C318 64 344 92 374 76 C356 120 326 160 306 200 Z"
+        fill="url(#topo)" stroke="#3b2610" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M222 82 C230 120 236 160 238 196 M290 82 C282 120 276 160 274 196 M256 66 L256 196" fill="none" stroke="#b77c18" stroke-width="5" stroke-linecap="round" opacity=".7"/>
+
+  <!-- corda -->
+  <rect x="182" y="184" width="148" height="36" rx="18" fill="url(#corda)" stroke="#3b2610" stroke-width="8"/>
+  <path d="M200 188l14 28M224 188l14 28M248 188l14 28M272 188l14 28M296 188l14 28" stroke="#7a4f12" stroke-width="5" stroke-linecap="round"/>
+  <!-- ponta da corda pendurada, com nó e franja -->
+  <path d="M318 212 C344 232 356 254 360 280" fill="none" stroke="#3b2610" stroke-width="22" stroke-linecap="round"/>
+  <path d="M318 212 C344 232 356 254 360 280" fill="none" stroke="url(#corda)" stroke-width="12" stroke-linecap="round"/>
+  <rect x="348" y="276" width="26" height="14" rx="6" fill="#c48a26" stroke="#3b2610" stroke-width="6"/>
+  <path d="M350 292 h22 l3 30 h-28 z" fill="#e0aa3e" stroke="#3b2610" stroke-width="6" stroke-linejoin="round"/>
+  <path d="M356 296 v22 M361 296 v24 M366 296 v22" stroke="#8a5a14" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- coroa -->
+  <path d="M214 286 L214 248 L234 266 L256 236 L278 266 L298 248 L298 286 Z" fill="#3b2410" stroke="#3b2410" stroke-width="4" stroke-linejoin="round"/>
+  <rect x="210" y="290" width="92" height="12" rx="3" fill="#3b2410"/>
+  <circle cx="256" cy="264" r="5" fill="#f5c542"/>
+
+  <!-- linhas e losango -->
+  <path d="M132 318 H204 M308 318 H380" stroke="#3b2410" stroke-width="6" stroke-linecap="round"/>
+  <path d="M150 440 H236 M276 440 H362" stroke="#3b2410" stroke-width="6" stroke-linecap="round"/>
+  <path d="M256 428 l10 12 -10 12 -10 -12z" fill="#3b2410"/>
+
+  <!-- MQ$ -->
+  <text x="256" y="414" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="900" font-size="108"
+        fill="#3b2410" stroke="#fbe08a" stroke-width="3" paint-order="stroke" letter-spacing="-2">MQ$</text>
+
+  <!-- moedas soltas na frente -->
+  <g stroke="#5a3a0c" stroke-width="5" fill="url(#moeda)">
+    <ellipse cx="150" cy="470" rx="40" ry="16"/>
+    <ellipse cx="372" cy="474" rx="40" ry="16"/>
+  </g>
+</svg>
