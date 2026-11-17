@@ -10,11 +10,12 @@
 //     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
 //     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261117001941';
+import { uid } from './util.js?v=20261117003319';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
-export const PREFS_PADRAO = { pct_investir: 0.15, meses_reserva: 6, pct_max_gasto: 0.7 };
+// meus_nomes: nomes que identificam as próprias contas (Pix/TED com eles = transferência entre contas)
+export const PREFS_PADRAO = { pct_investir: 0.15, meses_reserva: 6, pct_max_gasto: 0.7, meus_nomes: [] };
 
 export async function createStore() {
   const cfg = window.FIN_CONFIG || {};
@@ -181,14 +182,15 @@ async function supabaseStore(cfg) {
   const CLASSE_COLS = 'id, perfil_id, nome, cor, ordem, ativo, escopo_padrao';
   const REGRA_COLS = 'id, perfil_id, texto, classe_id, escopo';
   const MES_COLS = 'perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao';
-  const PREF_COLS = 'perfil_id, pct_investir, meses_reserva, pct_max_gasto';
-  const LANC_COLS = 'id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave';
+  const PREF_COLS = 'perfil_id, pct_investir, meses_reserva, pct_max_gasto, meus_nomes';
+  const LANC_COLS = 'id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave, sentido';
 
   const comId = (row, x) => (x.id ? { ...row, id: x.id } : row);
   const limpaLanc = (l) => comId({
     perfil_id: l.perfil_id, data: l.data, descricao: String(l.descricao).slice(0, 200), valor: l.valor,
-    destino: l.destino, categoria_id: l.destino === 'despesa' ? l.categoria_id : null,
+    destino: l.destino, categoria_id: l.categoria_id || null,
     classe_id: l.classe_id || null,
+    sentido: l.sentido || (['receita', 'rendimento'].includes(l.destino) ? 'entrada' : 'saida'),
     escopo: l.escopo || 'pessoal', origem: l.origem || 'manual', conta: l.conta || null, chave: l.chave || null,
   }, l);
   const numLanc = (l) => ({ ...l, valor: Number(l.valor) });
@@ -279,7 +281,10 @@ async function supabaseStore(cfg) {
       check(await sb.from('fin_categorias').delete().eq('id', id));
     },
     async savePrefs(perfilId, p) {
-      const row = { perfil_id: perfilId, pct_investir: p.pct_investir, meses_reserva: p.meses_reserva, pct_max_gasto: p.pct_max_gasto };
+      const row = {
+        perfil_id: perfilId, pct_investir: p.pct_investir, meses_reserva: p.meses_reserva, pct_max_gasto: p.pct_max_gasto,
+        meus_nomes: Array.isArray(p.meus_nomes) ? p.meus_nomes : [],
+      };
       const salvo = check(await sb.from('fin_preferencias').upsert(row, { onConflict: 'user_id,perfil_id' }).select(PREF_COLS).single());
       const { perfil_id: _id, ...resto } = salvo;
       return { ...PREFS_PADRAO, ...resto };

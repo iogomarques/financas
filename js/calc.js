@@ -116,6 +116,7 @@ export function aplicarLancamentos(meses, lancamentos) {
   for (const m of meses) out.set(key(m.ano, m.mes), { ...m, despesas: { ...(m.despesas || {}) }, auto: {} });
   const somas = new Map();
   for (const l of lancamentos || []) {
+    if (l.destino === 'transferencia') continue; // entre as próprias contas: não é receita nem despesa
     const [a, mm] = String(l.data).split('-').map(Number);
     const k = key(a, mm);
     if (!somas.has(k)) somas.set(k, { ano: a, mes: mm, campos: {} });

@@ -1,9 +1,9 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117001941';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117001941';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117001941';
-import { lerPlanilha } from './importer.js?v=20261117001941';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117001941';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir } from './classes.js?v=20261117001941';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117003319';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117003319';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117003319';
+import { lerPlanilha } from './importer.js?v=20261117003319';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117003319';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117003319';
 
 const app = document.getElementById('app');
 const S = {
@@ -58,6 +58,170 @@ const classePorId = (id) => S.data.classes.find((c) => c.id === id);
 const LADO = { pessoal: 'Pessoal', empresa: 'Empresa' };
 /** Despesas ainda sem categoria de gasto. */
 const semClasse = (lista) => lista.filter((l) => l.destino === 'despesa' && !l.classe_id);
+
+/* ------------------------------------------------ conferência de erros */
+const IGNORADOS_KEY = 'financas-conferencia-ok';
+function lerIgnorados() { try { return new Set(JSON.parse(localStorage.getItem(IGNORADOS_KEY)) || []); } catch { return new Set(); } }
+function ignorar(chave) {
+  const s = lerIgnorados(); s.add(chave);
+  try { localStorage.setItem(IGNORADOS_KEY, JSON.stringify([...s])); } catch { /* sem armazenamento */ }
+}
+const diasEntre = (a, b) => Math.abs((new Date(a + 'T12:00:00') - new Date(b + 'T12:00:00')) / 86400000);
+
+/**
+ * Procura erros comuns nos lançamentos de um mês (ou de todos, sem prefixo).
+ * Cada problema: { chave, tipo, titulo, texto, ids, acoes: [{rotulo, fazer}] }
+ */
+function conferir(prefixo = '') {
+  const doMes = S.data.lancamentos.filter((l) => !prefixo || String(l.data).startsWith(prefixo));
+  const ignorados = lerIgnorados();
+  const nomes = prefs().meus_nomes || [];
+  const problemas = [];
+  const usados = new Set();
+
+  // 1) Mesmo valor saindo de uma conta e entrando em outra (até 3 dias): transferência entre as próprias contas
+  const saidas = doMes.filter((l) => sentidoDe(l) === 'saida');
+  for (const s of saidas) {
+    const e = doMes.find((x) => x.id !== s.id && !usados.has(x.id) && sentidoDe(x) === 'entrada'
+      && Math.abs(x.valor - s.valor) < 0.005 && diasEntre(x.data, s.data) <= 3 && contaDe(x) !== contaDe(s));
+    if (!e || usados.has(s.id)) continue;
+    if (s.destino === 'transferencia' && e.destino === 'transferencia') continue;
+    usados.add(s.id); usados.add(e.id);
+    problemas.push({
+      chave: `par:${s.id}:${e.id}`, tipo: 'transferencia',
+      titulo: `Parece transferência entre suas contas: ${fmtBRL(s.valor)}`,
+      texto: `Saiu de <b>${esc(contaDe(s) || '?')}</b> em ${fmtDia(s.data)} ("${esc(s.descricao)}") e entrou em <b>${esc(contaDe(e) || '?')}</b> em ${fmtDia(e.data)} ("${esc(e.descricao)}").
+        Se for dinheiro passando de uma conta sua para outra, não é gasto nem receita.`,
+      ids: [s.id, e.id],
+      acoes: [{ rotulo: 'É transferência (não contar)', fazer: () => virarTransferencia([s.id, e.id]) }],
+    });
+  }
+
+  // 2) Receita/despesa com o nome das próprias contas ou "mesma titularidade"
+  for (const l of doMes) {
+    if (usados.has(l.id) || l.destino === 'transferencia') continue;
+    const t = detectarTransferencia(l.descricao, nomes);
+    if (t === 'propria') {
+      problemas.push({
+        chave: `propria:${l.id}`, tipo: 'transferencia',
+        titulo: `${l.destino === 'receita' ? 'Receita' : DESTINOS[l.destino]} que parece transferência: ${fmtBRL(l.valor)}`,
+        texto: `"${esc(l.descricao)}" em ${fmtDia(l.data)} (${esc(contaDe(l))}) tem o nome de uma conta sua. Se foi entre suas contas, não conta como ${l.destino === 'receita' ? 'receita' : 'gasto'}.`,
+        ids: [l.id],
+        acoes: [{ rotulo: 'É transferência (não contar)', fazer: () => virarTransferencia([l.id]) }],
+      });
+    }
+  }
+
+  // 3) Pagamento de fatura do cartão
+  const comprasCartao = doMes.filter((l) => l.destino === 'despesa' && S.data.categorias.find((c) => c.id === l.categoria_id)?.tipo === 'credito');
+  for (const l of doMes) {
+    if (detectarTransferencia(l.descricao, []) !== 'fatura') continue;
+    if (l.destino === 'despesa' && comprasCartao.length && !comprasCartao.includes(l)) {
+      problemas.push({
+        chave: `fatura2x:${l.id}`, tipo: 'duplicado',
+        titulo: `Fatura contada duas vezes: ${fmtBRL(l.valor)}`,
+        texto: `"${esc(l.descricao)}" está como gasto, mas as compras do cartão também foram lançadas neste mês. Assim o mesmo dinheiro conta duas vezes.`,
+        ids: [l.id],
+        acoes: [{ rotulo: 'Pagamento é transferência', fazer: () => virarTransferencia([l.id]) }],
+      });
+    } else if (l.destino === 'transferencia' && !comprasCartao.length) {
+      problemas.push({
+        chave: `fatura0:${l.id}`, tipo: 'aviso',
+        titulo: `Fatura paga sem as compras do cartão: ${fmtBRL(l.valor)}`,
+        texto: `O pagamento "${esc(l.descricao)}" (${fmtDia(l.data)}) não está contando como gasto, e as compras do cartão ainda não foram lançadas.
+          Importe o extrato do cartão, ou conte o pagamento como um gasto único.`,
+        ids: [l.id],
+        acoes: [
+          { rotulo: 'Contar como gasto (Fatura do cartão)', fazer: () => faturaComoGasto(l.id) },
+          { rotulo: 'Vou importar o cartão', link: `#/lancamentos/${l.data.slice(0, 4)}/${Number(l.data.slice(5, 7))}` },
+        ],
+      });
+    }
+  }
+
+  // 4) Possível repetido: mesmo dia, mesmo valor, mesma loja/pessoa, em lançamentos diferentes
+  const vistos = [];
+  for (const l of doMes) {
+    if (l.destino === 'transferencia') continue;
+    const igual = vistos.find((x) => x.data === l.data && Math.abs(x.valor - l.valor) < 0.005 && x.destino === l.destino
+      && (normDesc(x.descricao) === normDesc(l.descricao) || mesmaLoja(palavrasChave(x.descricao), palavrasChave(l.descricao)))
+      && !(x.chave && l.chave && x.chave !== l.chave && contaDe(x) === contaDe(l))); // no mesmo extrato, ids diferentes = compras diferentes
+    if (igual) {
+      problemas.push({
+        chave: `dup:${igual.id}:${l.id}`, tipo: 'duplicado',
+        titulo: `Possível lançamento repetido: ${fmtBRL(l.valor)} em ${fmtDia(l.data)}`,
+        texto: `"${esc(igual.descricao)}" (${esc(contaDe(igual))}) e "${esc(l.descricao)}" (${esc(contaDe(l))}). Se for o mesmo gasto lançado duas vezes, exclua um.`,
+        ids: [igual.id, l.id],
+        acoes: [{ rotulo: 'Excluir o segundo', fazer: () => excluirLancamentos([l.id]) }],
+      });
+    }
+    vistos.push(l);
+  }
+  return problemas.filter((p) => !ignorados.has(p.chave));
+}
+
+async function virarTransferencia(ids) {
+  const porSentido = { entrada: [], saida: [] };
+  for (const id of ids) {
+    const l = S.data.lancamentos.find((x) => x.id === id);
+    if (l) porSentido[sentidoDe(l)].push(id);
+  }
+  for (const [sentido, grupo] of Object.entries(porSentido)) {
+    if (!grupo.length) continue;
+    const salvos = await S.store.atualizarLancamentos(grupo, { destino: 'transferencia', classe_id: null, sentido });
+    for (const s of salvos) {
+      const i = S.data.lancamentos.findIndex((x) => x.id === s.id);
+      if (i >= 0) S.data.lancamentos[i] = { ...S.data.lancamentos[i], ...s };
+    }
+  }
+}
+async function faturaComoGasto(id) {
+  const l = S.data.lancamentos.find((x) => x.id === id);
+  let classe = S.data.classes.find((c) => normDesc(c.nome).startsWith('fatura do cartao'));
+  if (!classe) {
+    classe = await S.store.saveClasse({ perfil_id: S.perfilId, nome: 'Fatura do cartão (sem detalhe)', cor: '#475569', ordem: S.data.classes.length + 1, ativo: true, escopo_padrao: null });
+    S.data.classes.push(classe);
+  }
+  const conta = l.categoria_id || cats().find((c) => c.tipo === 'debito')?.id || cats()[0]?.id;
+  const [salvo] = await S.store.atualizarLancamentos([id], { destino: 'despesa', classe_id: classe.id, categoria_id: conta, sentido: 'saida' });
+  const i = S.data.lancamentos.findIndex((x) => x.id === id);
+  if (i >= 0 && salvo) S.data.lancamentos[i] = { ...S.data.lancamentos[i], ...salvo };
+}
+async function excluirLancamentos(ids) {
+  for (const id of ids) await S.store.deleteLancamento(id);
+  S.data.lancamentos = S.data.lancamentos.filter((x) => !ids.includes(x.id));
+}
+
+/** Bloco "Conferir antes de classificar" com os problemas e botões de correção. */
+function blocoConferencia(problemas) {
+  if (!problemas.length) return '';
+  const icone = { transferencia: '⇄', duplicado: '⧉', aviso: '!' };
+  return `<section class="card conferencia">
+    <h2>Conferir (${problemas.length})</h2>
+    <p class="sub">O site encontrou movimentações que podem distorcer as contas. Confira e corrija com um clique — ou marque "Está certo".</p>
+    ${problemas.map((p, i) => `
+      <div class="problema ${p.tipo}" data-p="${i}">
+        <span class="problema-icone" aria-hidden="true">${icone[p.tipo] || '!'}</span>
+        <div class="problema-txt"><b>${p.titulo}</b><p class="sub">${p.texto}</p>
+          <div class="acoes">
+            ${p.acoes.map((a, j) => a.link ? `<a class="btn" href="${a.link}">${a.rotulo}</a>` : `<button class="btn ${j === 0 ? 'primario' : ''}" data-acao-p="${j}">${a.rotulo}</button>`).join('')}
+            <button class="btn fantasma" data-ok>Está certo</button>
+          </div>
+        </div>
+      </div>`).join('')}
+  </section>`;
+}
+function bindConferencia(main, problemas) {
+  main.querySelectorAll('.problema').forEach((el) => {
+    const p = problemas[Number(el.dataset.p)];
+    el.querySelectorAll('[data-acao-p]').forEach((b) => b.addEventListener('click', async () => {
+      b.disabled = true;
+      try { await p.acoes[Number(b.dataset.acaoP)].fazer(); toast('Corrigido.'); render(); }
+      catch (e) { toast(e.message, 'erro'); b.disabled = false; }
+    }));
+    el.querySelector('[data-ok]').addEventListener('click', () => { ignorar(p.chave); render(); });
+  });
+}
 
 /** Cria as categorias sugeridas (Funcionários, Fornecedores, Mercado...). */
 async function criarClassesSugeridas() {
@@ -234,7 +398,8 @@ function shell(r) {
   const ano = r.ano || anoAtual();
   // Telas por mês mantêm o mês aberto ao trocar de tela
   const sufixoMes = r.ano && r.mes ? `/${r.ano}/${r.mes}` : '';
-  const pendentes = semClasse(S.data.lancamentos).length;
+  // Contador do menu: gastos sem categoria + itens para conferir
+  const pendentes = S.user && S.autorizado !== false ? semClasse(S.data.lancamentos).length + conferir().length : 0;
   const email = S.user?.email || '';
   const marca = '<div class="marca"><img src="icons/icon.svg" alt="" width="30" height="30"><span>Finanças Marques</span></div>';
   return `
@@ -558,6 +723,7 @@ function renderMes(main, ano, mes) {
           ${top.map(([id, v]) => { const c = classePorId(id); return `<div class="linha-cat"><span class="dot" style="background:${c?.cor}"></span>
             <div class="nome">${esc(c?.nome || '')}</div><div class="val"><strong>${fmtBRL(v)}</strong><span class="delta">${Math.round((v / tot) * 100)}%</span></div></div>`; }).join('')}
           ${pend ? `<p class="hint aviso-txt">${pend} ${pend === 1 ? 'gasto' : 'gastos'} sem categoria. <a href="#/classificar/${ano}/${mes}">Classificar agora →</a></p>` : ''}
+          ${(() => { const n = conferir(`${ano}-${pad2(mes)}`).length; return n ? `<p class="hint aviso-txt">${n} ${n === 1 ? 'item' : 'itens'} para conferir (transferências, fatura, repetidos). <a href="#/classificar/${ano}/${mes}">Conferir →</a></p>` : ''; })()}
           <div class="linha-total"><a href="#/categorias/${ano}/${mes}">Ver todas as categorias →</a></div>
         </section>`;
       })()}
@@ -597,7 +763,14 @@ function renderMes(main, ano, mes) {
 }
 
 /* ===================================================== lançamentos */
-const DESTINOS = { despesa: 'Despesa', receita: 'Receita', rendimento: 'Rendimento / outras', investimento: 'Investimento' };
+const DESTINOS = {
+  despesa: 'Despesa', receita: 'Receita', rendimento: 'Rendimento / outras', investimento: 'Investimento',
+  transferencia: 'Transferência entre contas',
+};
+/** Sentido do dinheiro na conta (transferência não diz pelo tipo). */
+const sentidoDe = (l) => l.sentido || (l.destino === 'receita' || l.destino === 'rendimento' ? 'entrada' : 'saida');
+/** Nome da conta/cartão do lançamento. */
+const contaDe = (l) => S.data.categorias.find((c) => c.id === l.categoria_id)?.nome || l.conta || '';
 const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 const pad2 = (n) => String(n).padStart(2, '0');
 const isoHoje = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
@@ -662,15 +835,17 @@ function renderLancamentos(main, ano, mes) {
   const linha = (l) => {
     const cat = catPorId.get(l.categoria_id);
     const classe = classePorId(l.classe_id);
-    const entrada = l.destino === 'receita' || l.destino === 'rendimento';
-    const cor = classe ? classe.cor : cat ? corCat(cat) : entrada ? 'var(--pos)' : 'var(--c-saldo)';
+    const transf = l.destino === 'transferencia';
+    const entrada = sentidoDe(l) === 'entrada';
+    const cor = transf ? 'var(--muted)' : classe ? classe.cor : cat ? corCat(cat) : entrada ? 'var(--pos)' : 'var(--c-saldo)';
     const rotuloClasse = l.destino !== 'despesa' ? DESTINOS[l.destino]
       : classe ? esc(classe.nome) : '<span class="tag aviso">sem categoria</span>';
-    return `<button class="lanc" data-id="${l.id}">
-      <span class="lanc-icone" style="--cor:${cor}">${entrada ? '↓' : l.destino === 'investimento' ? '◆' : '↑'}</span>
+    const nomeConta = cat?.nome || l.conta;
+    return `<button class="lanc ${transf ? 'transf' : ''}" data-id="${l.id}">
+      <span class="lanc-icone" style="--cor:${cor}">${transf ? '⇄' : entrada ? '↓' : l.destino === 'investimento' ? '◆' : '↑'}</span>
       <span class="lanc-txt"><b>${esc(l.descricao)}</b>
-        <small>${rotuloClasse}${cat ? ` · ${esc(cat.nome)}` : ''} · <span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo] || 'Pessoal'}</span>${l.origem === 'extrato' ? ' · <span class="tag">extrato</span>' : ''}</small></span>
-      <span class="lanc-valor ${entrada ? 'pos' : l.destino === 'despesa' ? 'neg' : ''}">${entrada ? '+' : '−'} ${fmtBRL(l.valor)}</span>
+        <small>${rotuloClasse}${nomeConta ? ` · ${esc(nomeConta)}` : ''}${transf ? ' · não conta' : ` · <span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo] || 'Pessoal'}</span>`}${l.origem === 'extrato' ? ' · <span class="tag">extrato</span>' : ''}</small></span>
+      <span class="lanc-valor ${transf ? '' : entrada ? 'pos' : l.destino === 'despesa' ? 'neg' : ''}">${entrada ? '+' : '−'} ${fmtBRL(l.valor)}</span>
     </button>`;
   };
 
@@ -704,7 +879,7 @@ function renderLancamentos(main, ano, mes) {
             ${cats().map((c) => `<option value="${c.id}" ${fl.cat === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
           </optgroup>
           <optgroup label="Entradas">
-            ${['receita', 'rendimento', 'investimento'].map((d) => `<option value="d:${d}" ${fl.cat === 'd:' + d ? 'selected' : ''}>${DESTINOS[d]}</option>`).join('')}
+            ${['receita', 'rendimento', 'investimento', 'transferencia'].map((d) => `<option value="d:${d}" ${fl.cat === 'd:' + d ? 'selected' : ''}>${DESTINOS[d]}</option>`).join('')}
           </optgroup>
         </select>
         <input type="search" data-f="busca" placeholder="Buscar descrição…" value="${esc(fl.busca)}" aria-label="Buscar">
@@ -719,7 +894,7 @@ function renderLancamentos(main, ano, mes) {
         : !lista.length ? '<p class="sub">Nenhum lançamento com esse filtro.</p>'
         : [...porDia.entries()].map(([dia, ls]) => {
           const d = new Date(dia + 'T12:00:00');
-          const totalDia = ls.reduce((s, l) => s + (l.destino === 'despesa' ? -l.valor : l.destino === 'investimento' ? 0 : l.valor), 0);
+          const totalDia = ls.reduce((s, l) => s + (l.destino === 'despesa' ? -l.valor : l.destino === 'investimento' || l.destino === 'transferencia' ? 0 : l.valor), 0);
           return `<div class="dia"><div class="dia-cab"><span>${DIAS[d.getDay()]}, ${fmtDia(dia)}</span><span class="${cls(totalDia)}">${fmtBRL(totalDia)}</span></div>
             ${ls.map(linha).join('')}</div>`;
         }).join('')}
@@ -774,18 +949,24 @@ function abrirLancamento(existente, { ano, mes }) {
         </div>
         <label class="campo"><span>Descrição</span><input name="descricao" list="lista-descricoes" maxlength="200" autocomplete="off" placeholder="Ex.: Mercado, Pix João (salário), Fatura..." value="${esc(existente?.descricao || '')}" required></label>
         <datalist id="lista-descricoes">${descricoes.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>
-        <div class="campos-2" data-so-despesa>
-          <label class="campo"><span>Saiu de qual conta/cartão</span>
+        <div class="campos-2">
+          <label class="campo"><span>Conta / cartão</span>
             <select name="categoria_id">${c.map((x) => `<option value="${x.id}" ${existente?.categoria_id === x.id ? 'selected' : ''}>${esc(x.nome)} (${x.tipo === 'debito' ? 'débito' : 'crédito'})</option>`).join('')}</select>
           </label>
-          <label class="campo"><span>Categoria de gasto</span>
+          <label class="campo" data-so-despesa><span>Categoria de gasto</span>
             <select name="classe_id"><option value="">— sem categoria —</option>
               ${classes().filter((x) => x.ativo !== false || x.id === existente?.classe_id).map((x) => `<option value="${x.id}" ${existente?.classe_id === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select>
           </label>
+          <div class="campo" data-so-transf><span>Nesta conta, o dinheiro</span>
+            <div class="seg" role="radiogroup" aria-label="Sentido">
+              ${[['saida', 'Saiu'], ['entrada', 'Entrou']].map(([v, t]) => `<label><input type="radio" name="sentido" value="${v}" ${(existente ? sentidoDe(existente) : 'saida') === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}
+            </div>
+          </div>
         </div>
         <label class="check-linha" data-so-despesa><input type="checkbox" name="lembrar"> Criar regra: classificar sempre assim quando a descrição tiver
-          <input class="regra-texto" name="texto_regra" value="${esc(textoBase(existente?.descricao || ''))}" aria-label="Texto da regra"></label>
-        <div class="campo"><span>Este gasto é</span>
+          <input class="regra-texto" name="texto_regra" value="${esc(regraPadrao(existente?.descricao || ''))}" aria-label="Texto da regra"></label>
+        <p class="hint" data-so-transf>Transferência entre as suas contas (ou pagamento da fatura do cartão) fica registrada, mas não conta como receita nem gasto.</p>
+        <div class="campo" data-nao-transf><span>Este lançamento é</span>
           <div class="seg" role="radiogroup" aria-label="Pessoal ou empresa">
             ${[['pessoal', 'Pessoal'], ['empresa', 'Da empresa']].map(([v, t]) => `<label><input type="radio" name="escopo" value="${v}" ${(existente?.escopo || 'pessoal') === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}
           </div>
@@ -807,6 +988,8 @@ function abrirLancamento(existente, { ano, mes }) {
   const atualizarTipo = () => {
     const d = form.destino.value;
     dlg.querySelectorAll('[data-so-despesa]').forEach((x) => { x.hidden = d !== 'despesa'; });
+    dlg.querySelectorAll('[data-so-transf]').forEach((x) => { x.hidden = d !== 'transferencia'; });
+    dlg.querySelectorAll('[data-nao-transf]').forEach((x) => { x.hidden = d === 'transferencia'; });
   };
   form.addEventListener('change', atualizarTipo);
   atualizarTipo();
@@ -822,7 +1005,7 @@ function abrirLancamento(existente, { ano, mes }) {
   });
   // Ao digitar uma descrição conhecida, sugere conta, categoria e lado (pelas regras ou pela última vez)
   form.descricao.addEventListener('change', () => {
-    form.texto_regra.value = textoBase(form.descricao.value);
+    form.texto_regra.value = regraPadrao(form.descricao.value);
     if (existente) return;
     const conta = categoriaPorHistorico(form.descricao.value);
     if (conta && form.categoria_id.querySelector(`option[value="${conta}"]`)) form.categoria_id.value = conta;
@@ -844,8 +1027,9 @@ function abrirLancamento(existente, { ano, mes }) {
       descricao: form.descricao.value.trim(),
       valor,
       destino,
-      categoria_id: destino === 'despesa' ? form.categoria_id.value : null,
+      categoria_id: form.categoria_id.value || null,
       classe_id: destino === 'despesa' ? form.classe_id.value || null : null,
+      sentido: destino === 'transferencia' ? form.sentido.value : destino === 'receita' || destino === 'rendimento' ? 'entrada' : 'saida',
       escopo: form.escopo.value,
       origem: existente?.origem || 'manual',
     };
@@ -956,17 +1140,28 @@ function abrirImportacao({ ano, mes }) {
       const valor = cfg.inverter ? -l.valor : l.valor;
       let status = 'novo';
       if (chaves.has(l.chave)) status = 'ja';
+      // Parece repetido: mesmo dia, mesmo valor e MESMO sentido (sentido oposto é o outro lado de uma transferência)
       else if (S.data.lancamentos.some((x) => x.data === l.data && Math.abs(x.valor - Math.abs(valor)) < 0.005
+        && sentidoDe(x) === (valor < 0 ? 'saida' : 'entrada')
         && (normDesc(x.descricao).slice(0, 10) === normDesc(l.descricao).slice(0, 10) || x.origem === 'manual'))) status = 'parece';
       const saida = valor < 0;
       // Categoria de gasto e lado: regra → histórico → padrão do arquivo
       const sug = sugerir(l.descricao, { regras: S.data.regras, classes: S.data.classes, lancamentos: S.data.lancamentos, escopoPadrao: cfg.escopo });
       const classeId = l.classeEscolhida !== undefined ? l.classeEscolhida : saida ? sug.classe_id : null;
       const ladoClasse = classePorId(classeId)?.escopo_padrao;
+      // Transferência entre as próprias contas? (fatura, nome próprio, ou par com outra conta já importada)
+      const tipoTransf = detectarTransferencia(l.descricao, prefs().meus_nomes || []);
+      const par = !tipoTransf && S.data.lancamentos.find((x) => Math.abs(x.valor - Math.abs(valor)) < 0.005
+        && diasEntre(x.data, l.data) <= 3 && sentidoDe(x) === (saida ? 'entrada' : 'saida') && contaDe(x) && contaDe(x) !== catPadrao?.nome);
+      const transf = tipoTransf || (par ? 'par' : null);
+      const padrao = transf ? 'transferencia'
+        : saida ? 'despesa'
+        : catPadrao?.tipo === 'credito' ? 'transferencia' // entrada no cartão = pagamento da fatura
+        : 'receita';
       return {
-        i, ...l, valor: Math.abs(valor), saida, status,
+        i, ...l, valor: Math.abs(valor), saida, status, transf, par,
         incluir: l.incluir ?? status === 'novo',
-        destino: l.destinoEscolhido ?? (saida ? 'despesa' : catPadrao?.tipo === 'credito' ? 'ignorar' : 'receita'),
+        destino: l.destinoEscolhido ?? padrao,
         categoria_id: cfg.categoria,
         classe_id: classeId,
         escopo: l.escopoEscolhido ?? (l.classeEscolhida !== undefined && ladoClasse ? ladoClasse : saida ? sug.escopo : cfg.escopo),
@@ -979,6 +1174,7 @@ function abrirImportacao({ ano, mes }) {
       classes().filter((x) => x.ativo !== false || x.id === sel).map((x) => `<option value="${x.id}" ${sel === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('');
     const selecionadas = linhas.filter((l) => l.incluir && l.status !== 'ja' && l.destino !== 'ignorar');
     const autoClass = selecionadas.filter((l) => l.destino === 'despesa' && l.classe_id).length;
+    const nTransf = selecionadas.filter((l) => l.destino === 'transferencia').length;
     const semCat = selecionadas.filter((l) => l.destino === 'despesa' && !l.classe_id).length;
 
     dlg.innerHTML = `
@@ -991,6 +1187,7 @@ function abrirImportacao({ ano, mes }) {
             <span class="tag">${n('ja')} já importadas (serão puladas)</span>
             ${n('parece') ? `<span class="tag aviso">${n('parece')} parecem repetidas (desmarcadas — confira)</span>` : ''}
             ${autoClass ? `<span class="tag pos">${autoClass} já com categoria</span>` : ''}
+            ${nTransf ? `<span class="tag">${nTransf} transferências entre contas (não contam)</span>` : ''}
             ${semCat ? `<span class="tag">${semCat} para classificar depois</span>` : ''}
           </div>
           ${!S.data.classes.length ? '<p class="hint">Dica: crie as categorias de gasto (Funcionários, Assinaturas…) em Ajustes ou na tela Classificar. Dá para importar agora e classificar depois.</p>' : ''}
@@ -1007,8 +1204,9 @@ function abrirImportacao({ ano, mes }) {
                     <td class="desc">${esc(l.descricao)}${l.status === 'ja' ? ' <span class="tag">já importada</span>' : l.status === 'parece' ? ' <span class="tag aviso">parece repetida</span>' : ''}</td>
                     <td class="${l.saida ? 'neg' : 'pos'}">${l.saida ? '−' : '+'} ${fmtNum(l.valor)}</td>
                     <td><select data-c="destino" ${l.status === 'ja' ? 'disabled' : ''}>
-                      ${[['despesa', 'Despesa'], ['receita', 'Receita'], ['rendimento', 'Rendim./outras'], ['investimento', 'Investimento'], ['ignorar', 'Ignorar']]
-                        .map(([v, t]) => `<option value="${v}" ${l.destino === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+                      ${[['despesa', 'Despesa'], ['receita', 'Receita'], ['rendimento', 'Rendim./outras'], ['investimento', 'Investimento'], ['transferencia', 'Transferência'], ['ignorar', 'Não importar']]
+                        .map(([v, t]) => `<option value="${v}" ${l.destino === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
+                      ${l.destino === 'transferencia' && l.transf ? `<span class="tag" title="${l.transf === 'par' ? `Mesmo valor em ${esc(contaDe(l.par))} em ${fmtDia(l.par.data)}` : ''}">${{ fatura: 'fatura', propria: 'conta sua', par: 'par: ' + esc(contaDe(l.par)) }[l.transf]}</span>` : ''}</td>
                     <td><select data-c="classe" ${l.status === 'ja' || l.destino !== 'despesa' ? 'disabled' : ''}>${opcoesClasse(l.classe_id)}</select>
                       ${l.por === 'regra' ? '<span class="tag pos" title="Classificado por uma regra">regra</span>' : l.por === 'historico' ? '<span class="tag" title="Igual a um lançamento anterior">anterior</span>' : ''}</td>
                     <td><select data-c="escopo" ${l.status === 'ja' ? 'disabled' : ''}>
@@ -1018,7 +1216,8 @@ function abrirImportacao({ ano, mes }) {
               </tbody>
             </table>
           </div>
-          <p class="hint">"Ignorar" serve para o que não é gasto nem receita, como o pagamento da fatura do cartão ou transferência entre suas contas.</p>
+          <p class="hint"><b>Transferência</b>: dinheiro passando entre suas contas ou pagamento da fatura do cartão — fica registrado, mas não conta como receita nem gasto.
+            <b>Não importar</b>: deixa a linha de fora.</p>
         </div>
         <footer>
           <button type="button" class="btn" data-a="voltar">Voltar</button>
@@ -1053,10 +1252,13 @@ function abrirImportacao({ ano, mes }) {
       const nomeConta = S.data.categorias.find((x) => x.id === cfg.categoria)?.nome || lido.conta;
       const novos = atuais.map((l) => ({
         perfil_id: S.perfilId, data: l.data, descricao: l.descricao.slice(0, 200), valor: Math.round(l.valor * 100) / 100,
-        destino: l.destino, categoria_id: l.destino === 'despesa' ? l.categoria_id : null,
+        destino: l.destino, categoria_id: l.categoria_id, // a conta/cartão do arquivo, em qualquer tipo
         classe_id: l.destino === 'despesa' ? l.classe_id || null : null,
+        sentido: l.saida ? 'saida' : 'entrada',
         escopo: l.escopo, origem: 'extrato', conta: nomeConta, chave: l.chave,
       }));
+      // O outro lado de um par (já importado antes como receita/despesa) também vira transferência
+      const paresParaCorrigir = atuais.filter((l) => l.destino === 'transferencia' && l.par && l.par.destino !== 'transferencia').map((l) => l.par.id);
       // Avisa se algum mês já tinha total digitado nesses campos
       const afetados = new Set();
       for (const l of novos) {
@@ -1071,6 +1273,7 @@ function abrirImportacao({ ano, mes }) {
       try {
         const inseridos = await S.store.importarLancamentos(novos);
         S.data.lancamentos.push(...inseridos);
+        if (paresParaCorrigir.length) await virarTransferencia([...new Set(paresParaCorrigir)]);
         const pulados = linhas.length - inseridos.length;
         const paraClassificar = semClasse(inseridos).length;
         toast(`${inseridos.length} importados${pulados ? ` · ${pulados} pulados (repetidos ou ignorados)` : ''}${paraClassificar ? ` · ${paraClassificar} para classificar` : ''}.`);
@@ -1119,12 +1322,14 @@ function renderClassificar(main, ano, mes) {
     if (k !== prefixo) outros.set(k, (outros.get(k) || 0) + 1);
   }
   // Agrupa compras parecidas (mesma descrição sem números): um clique classifica o grupo todo
+  // Agrupa pelas palavras que identificam a loja/pessoa ("mercadolivre", "joao silva"), ignorando "PIX ENVIADO", datas e códigos
   const mapa = new Map();
   for (const l of pend) {
-    const b = textoBase(l.descricao) || normDesc(l.descricao) || 'sem descricao';
+    const b = regraPadrao(l.descricao) || normDesc(l.descricao) || 'sem descricao';
     if (!mapa.has(b)) mapa.set(b, []);
     mapa.get(b).push(l);
   }
+  const problemas = conferir(prefixo);
   const grupos = [...mapa.entries()]
     .map(([base, ls]) => ({ base, ls, total: ls.reduce((s, l) => s + l.valor, 0) }))
     .sort((a, b) => b.total - a.total);
@@ -1135,10 +1340,12 @@ function renderClassificar(main, ano, mes) {
     ${cabecalhoMes(ano, mes, '#/classificar', `
       <button class="btn" data-a="aplicar-regras" title="Usa as regras salvas nos lançamentos ainda sem categoria">Aplicar regras</button>
       <a class="btn" href="#/categorias/${ano}/${mes}">Ver categorias</a>`)}
-    <p class="sub descricao">Os gastos sem categoria aparecem agrupados por descrição. Escolha a categoria com um clique: o grupo inteiro é classificado
-      e, com "lembrar" marcado, os próximos meses já vêm classificados.</p>
+    <p class="sub descricao">Primeiro confira o que o site achou de estranho (transferências entre suas contas, fatura contada duas vezes, repetidos).
+      Depois classifique: os gastos parecidos vêm juntos, um clique na categoria classifica o grupo e, com "lembrar", os próximos meses já vêm classificados.</p>
 
     ${!cl.length ? cardSemClasses() : ''}
+
+    ${blocoConferencia(problemas)}
 
     <section class="card progresso-card">
       <div class="progresso-topo">
@@ -1189,6 +1396,7 @@ function renderClassificar(main, ano, mes) {
       </section>`).join('')}</div>`}`;
 
   bindSemClasses(main);
+  bindConferencia(main, problemas);
   main.querySelector('[data-a="aplicar-regras"]').addEventListener('click', async () => {
     const alvo = semClasse(S.data.lancamentos).map((l) => ({ l, r: regraPara(l.descricao, S.data.regras) })).filter((x) => x.r);
     if (!alvo.length) { toast('Nenhum gasto sem categoria combina com as regras salvas.'); return; }
@@ -2097,6 +2305,8 @@ const GLOSSARIO = [
   ['Saldo final', 'É o saldo inicial do mês seguinte, puxado sozinho. Por isso ele só aparece depois que o mês seguinte é lançado.'],
   ['Resultado do saldo', 'Saldo final − saldo inicial. Mostra quanto o dinheiro guardado cresceu (verde) ou diminuiu (vermelho) no mês.'],
   ['Médias', 'Contam só os meses lançados. Um mês em branco não puxa a média para baixo.'],
+  ['Transferência entre contas', 'Dinheiro passando de uma conta sua para outra (ex.: Santander pessoal → Santander Empresas) ou pagamento da fatura do cartão. Fica registrado, mas não conta como receita nem gasto.'],
+  ['Regra automática', 'Se a descrição tem um texto (ex.: "joao silva", "mercadolivre"), o gasto já entra com a categoria certa. Criada ao classificar com "Lembrar" marcado.'],
   ['Organização (15% / 6× / 70%)', 'Metas a partir da receita média: investir 15%, ter reserva de 6 meses de receita e gastar no máximo 70%. Os percentuais mudam em Ajustes.'],
 ];
 
@@ -2137,9 +2347,12 @@ function renderAjuda(main) {
         <ol class="passos">
           <li>No app/site de cada banco, baixe o extrato do mês que terminou em <b>OFX</b> (ou CSV): conta da empresa, cartão da empresa, conta pessoal, cartão pessoal…</li>
           <li>Em <b>Lançamentos → Importar extrato</b>, importe <b>um arquivo por vez</b>, escolhendo de qual conta/cartão ele é.
-            Fatura paga e transferência entre as próprias contas: marque <b>Ignorar</b>.</li>
-          <li>Abra <b>Classificar</b>. Os gastos parecidos vêm juntos (ex.: todos os Pix para o mesmo funcionário). Clique na categoria e pronto —
-            deixe "Lembrar" marcado para os próximos meses virem classificados sozinhos.</li>
+            O site já marca como <b>Transferência</b> (não conta) o pagamento da fatura, o dinheiro entre as suas contas e os nomes cadastrados em Ajustes.</li>
+          <li><b>Cartão de crédito:</b> se o extrato da conta trouxer só o pagamento da fatura, importe também o extrato/fatura do cartão
+            (as compras de verdade). Se não tiver, a Conferência oferece contar o pagamento como um gasto "Fatura do cartão".</li>
+          <li>Abra <b>Classificar</b>. Primeiro, a <b>Conferência</b> mostra o que parece errado (transferência contada como receita,
+            fatura contada duas vezes, repetidos) — corrija com um clique. Depois, os gastos parecidos vêm juntos (ex.: todos os Pix para o mesmo funcionário):
+            clique na categoria e deixe "Lembrar" marcado para os próximos meses virem classificados sozinhos.</li>
           <li>Se um gasto da empresa saiu da conta pessoal (ou o contrário), troque o lado para <b>Empresa</b>/<b>Pessoal</b> antes de clicar.</li>
           <li>Veja o resultado em <b>Categorias</b> (quanto foi para cada coisa) e na <b>Visão do mês</b>.</li>
         </ol>
@@ -2287,6 +2500,18 @@ function renderAjustes(main) {
             <button class="btn icone perigo" data-a="apagar-regra" aria-label="Apagar regra">×</button>
           </div>`).join('')}
       </div>`}
+    </section>
+
+    <section class="card" id="minhas-contas">
+      <h2>Transferências entre as suas contas</h2>
+      <p class="sub">Escreva <b>um por linha</b> os nomes que aparecem no extrato quando o dinheiro vai de uma conta sua para outra:
+        o nome do titular, o nome da empresa, o CNPJ… Ex.: "IVONEY MARQUES", "MARQUES COMERCIO LTDA".
+        Pix/TED com esses nomes entram como <b>transferência</b> (não contam como receita nem gasto).
+        O site também reconhece sozinho pagamento de fatura e o mesmo valor saindo de uma conta e entrando em outra.</p>
+      <form class="meus-nomes">
+        <textarea name="nomes" rows="3" placeholder="IVONEY MARQUES&#10;MARQUES COMERCIO LTDA">${esc((p.meus_nomes || []).join('\n'))}</textarea>
+        <div class="acoes"><button class="btn primario">Salvar nomes</button></div>
+      </form>
     </section>
 
     <section class="card">
@@ -2449,8 +2674,16 @@ function renderAjustes(main) {
       const v = (n) => parseExpr(f[n].value).value;
       const novo = { pct_investir: v('pct_investir') / 100, meses_reserva: v('meses_reserva'), pct_max_gasto: v('pct_max_gasto') / 100 };
       if (Object.values(novo).some((x) => x === null || Number.isNaN(x))) throw new Error('Preencha os três campos.');
-      S.data.prefs[S.perfilId] = await S.store.savePrefs(S.perfilId, novo);
+      S.data.prefs[S.perfilId] = await S.store.savePrefs(S.perfilId, { ...prefs(), ...novo });
       toast('Preferências salvas.');
+    } catch (ex) { toast(ex.message, 'erro'); }
+  });
+  main.querySelector('.meus-nomes').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nomes = [...new Set(e.target.nomes.value.split('\n').map((x) => x.trim()).filter((x) => x.length >= 4))].slice(0, 30);
+    try {
+      S.data.prefs[S.perfilId] = await S.store.savePrefs(S.perfilId, { ...prefs(), meus_nomes: nomes });
+      toast(`${nomes.length} ${nomes.length === 1 ? 'nome salvo' : 'nomes salvos'}.`);
     } catch (ex) { toast(ex.message, 'erro'); }
   });
 

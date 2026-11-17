@@ -238,3 +238,18 @@ create policy "fin classes do dono" on public.fin_classes for all to authenticat
 create policy "fin regras do dono" on public.fin_regras for all to authenticated
   using ((select auth.uid()) = user_id and (select public.fin_acesso()))
   with check ((select auth.uid()) = user_id and (select public.fin_acesso()));
+
+-- ===================================================================
+-- Transferências entre as próprias contas (aplicado em 17/11/2026)
+-- destino 'transferencia' fica registrado mas não conta como receita nem despesa.
+-- sentido: entrada/saída do dinheiro na conta (para achar o "par" da transferência).
+-- meus_nomes: nomes que identificam as próprias contas no extrato.
+-- ===================================================================
+alter table public.fin_lancamentos drop constraint fin_lancamentos_destino_check;
+alter table public.fin_lancamentos add constraint fin_lancamentos_destino_check
+  check (destino in ('despesa', 'receita', 'rendimento', 'investimento', 'transferencia'));
+alter table public.fin_lancamentos drop constraint fin_lancamentos_categoria_ok;
+alter table public.fin_lancamentos add constraint fin_lancamentos_categoria_ok
+  check (destino <> 'despesa' or categoria_id is not null);
+alter table public.fin_lancamentos add column if not exists sentido text check (sentido in ('entrada', 'saida'));
+alter table public.fin_preferencias add column if not exists meus_nomes text[] not null default '{}';

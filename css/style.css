@@ -649,3 +649,18 @@ dialog.editor.largo { width: min(1120px, 100vw - 24px); }
   .cat-barra { display: none; }
   .grupo-cab .seg { width: 100%; }
 }
+
+/* conferência de erros */
+.conferencia { border: 1px solid color-mix(in srgb, var(--aviso) 45%, var(--border)); }
+.conferencia > h2::before { background: var(--aviso); }
+.problema { display: flex; gap: .8rem; padding: .85rem 0; border-top: 1px dashed var(--border); }
+.problema-icone {
+  flex: none; width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-weight: 800;
+  background: color-mix(in srgb, var(--aviso) 14%, transparent); color: var(--aviso);
+}
+.problema.transferencia .problema-icone { background: var(--accent-soft); color: var(--accent); }
+.problema.duplicado .problema-icone { background: color-mix(in srgb, var(--neg) 12%, transparent); color: var(--neg); }
+.problema-txt { flex: 1; min-width: 0; }
+.problema-txt .acoes { margin-top: .6rem; }
+.lanc.transf .lanc-txt b, .lanc.transf .lanc-valor { color: var(--muted); }
+.meus-nomes textarea { font-family: ui-monospace, Consolas, monospace; margin-top: .75rem; }
