@@ -291,3 +291,19 @@ alter table public.fin_classes add constraint fin_classes_pai_fkey foreign key (
 alter table public.fin_classes drop constraint if exists fin_classes_pai_diferente;
 alter table public.fin_classes add constraint fin_classes_pai_diferente check (pai_id is null or pai_id <> id);
 create index if not exists fin_classes_pai_idx on public.fin_classes (pai_id);
+
+-- ===================================================================
+-- Parcelas e recorrência das transações (2026-11-17)
+-- recorrencia: 'fixa' (assinatura, conta todo mês), 'parcelada' ou 'variavel'
+-- parcela/parcelas: ex. 3 de 10 (detectado de "PARC 03/10" no extrato)
+-- ===================================================================
+alter table public.fin_lancamentos
+  add column if not exists recorrencia text,
+  add column if not exists parcela smallint,
+  add column if not exists parcelas smallint;
+alter table public.fin_lancamentos drop constraint if exists fin_lancamentos_recorrencia_check;
+alter table public.fin_lancamentos add constraint fin_lancamentos_recorrencia_check
+  check (recorrencia is null or recorrencia in ('fixa', 'parcelada', 'variavel'));
+alter table public.fin_lancamentos drop constraint if exists fin_lancamentos_parcela_check;
+alter table public.fin_lancamentos add constraint fin_lancamentos_parcela_check
+  check ((parcela is null and parcelas is null) or (parcela between 1 and 99 and parcelas between 1 and 99 and parcela <= parcelas));

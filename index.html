@@ -19,13 +19,13 @@
   <script>
     // Aplica o tema escolhido antes de desenhar (evita piscar)
     // Padrão: tema claro. 'auto' segue o celular/computador.
-    try { var t = localStorage.getItem('financas-tema') || 'light'; if (t !== 'auto') document.documentElement.dataset.theme = t; }
+    try { var t = localStorage.getItem('financas-tema') || 'dark'; if (t !== 'auto') document.documentElement.dataset.theme = t; }
     catch (e) { document.documentElement.dataset.theme = 'light'; }
   </script>
-  <link rel="stylesheet" href="css/style.css?v=20261117184830">
-  <script src="js/config.js?v=20261117184830"></script>
+  <link rel="stylesheet" href="css/style.css?v=20261117191936">
+  <script src="js/config.js?v=20261117191936"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" defer></script>
-  <script type="module" src="js/app.js?v=20261117184830"></script>
+  <script type="module" src="js/app.js?v=20261117191936"></script>
 </head>
 <body>
   <div id="app">

@@ -70,6 +70,7 @@ Cada mudança grande de visual ganha uma marcação no GitHub antes de começar:
 - `backup-antes-transacoes-2026-11-17` — antes das abas de Transações e do Calendário (modo Controle)
 - `backup-antes-cartoes-2026-11-17` — antes da fatura/limite dos cartões, categorias de receita e subcategorias
 - `backup-antes-graficos-2026-11-17` — antes da página de Gráficos
+- `backup-antes-visual-mf-2026-11-17` — antes do visual inspirado no Minhas Finanças, das páginas de cartão/conta e das parcelas
 
 Para voltar: `git checkout backup-visual-2026-11-17 -- css js index.html`, rodar `sh versao.sh`, fazer commit e `git push`.
 (O banco de dados não precisa mudar: as colunas novas são ignoradas pelo visual antigo.)

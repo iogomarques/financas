@@ -10,7 +10,7 @@
 //     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
 //     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261117184830';
+import { uid } from './util.js?v=20261117191936';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
@@ -184,7 +184,7 @@ async function supabaseStore(cfg) {
   const REGRA_COLS = 'id, perfil_id, texto, classe_id, escopo';
   const MES_COLS = 'perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao';
   const PREF_COLS = 'perfil_id, pct_investir, meses_reserva, pct_max_gasto, meus_nomes, modo';
-  const LANC_COLS = 'id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave, sentido';
+  const LANC_COLS = 'id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave, sentido, recorrencia, parcela, parcelas';
 
   const comId = (row, x) => (x.id ? { ...row, id: x.id } : row);
   const limpaLanc = (l) => comId({
@@ -193,6 +193,7 @@ async function supabaseStore(cfg) {
     classe_id: l.classe_id || null,
     sentido: l.sentido || (['receita', 'rendimento'].includes(l.destino) ? 'entrada' : 'saida'),
     escopo: l.escopo || 'pessoal', origem: l.origem || 'manual', conta: l.conta || null, chave: l.chave || null,
+    recorrencia: l.recorrencia || null, parcela: l.parcelas ? l.parcela || null : null, parcelas: l.parcela ? l.parcelas || null : null,
   }, l);
   const numLanc = (l) => ({ ...l, valor: Number(l.valor) });
   const limpaMes = (r) => ({
