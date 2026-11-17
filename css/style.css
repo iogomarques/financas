@@ -903,3 +903,89 @@ h3.sub-secao { font-size: .78rem; text-transform: uppercase; letter-spacing: .05
   .barra-dir .btn { flex: 1; }
   .popover { width: min(290px, calc(100vw - 48px)); }
 }
+
+/* ===================== Transações (abas Despesas / Receitas / Transferências / Extrato) */
+.abas-trans { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .5rem; padding: .35rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.abas-trans a { display: grid; gap: .1rem; padding: .6rem .8rem; border-radius: 11px; text-decoration: none; color: var(--muted); border-bottom: 3px solid transparent; }
+.abas-trans a span { font-weight: 700; color: var(--text); }
+.abas-trans a small { font-size: .78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.abas-trans a:hover { background: var(--surface-2); }
+.abas-trans a.ativo { background: var(--surface-2); }
+.abas-trans a.despesas.ativo { border-bottom-color: var(--neg); }
+.abas-trans a.receitas.ativo { border-bottom-color: var(--pos); }
+.abas-trans a.transferencias.ativo { border-bottom-color: #f59e0b; }
+.abas-trans a.extrato.ativo { border-bottom-color: var(--accent); }
+.tabela-trans th, .tabela-trans td { text-align: left; }
+.tabela-trans th.t-valor, .tabela-trans td.t-valor { text-align: right; font-weight: 700; }
+.tabela-trans td.t-desc { white-space: normal; min-width: 200px; }
+.tabela-trans td.t-desc b { font-weight: 600; display: block; }
+.tabela-trans td.t-desc small { display: block; color: var(--muted); font-size: .78rem; }
+.tabela-trans td.t-data { color: var(--muted); }
+.tabela-trans td.t-valor.neg { color: var(--neg); }
+.tabela-trans td.t-valor.pos { color: var(--pos); }
+.tabela-trans td.t-rota { white-space: normal; }
+.tabela-trans td.t-rota > span { display: inline-flex; vertical-align: middle; }
+.tabela-trans .seta-transf { color: var(--muted); margin: 0 .5rem; }
+.tabela-trans .conta-nome { display: inline-flex; align-items: center; gap: .45rem; }
+.chip-cat { display: inline-flex; align-items: center; gap: .35rem; padding: .15rem .55rem; border-radius: 999px; font-size: .8rem; font-weight: 600;
+  background: color-mix(in srgb, var(--cor, #94a3b8) 14%, transparent); color: color-mix(in srgb, var(--cor, #94a3b8) 75%, var(--text)); }
+.chip-cat::before { content: ""; width: .5rem; height: .5rem; border-radius: 50%; background: var(--cor, #94a3b8); }
+.chip-cat.sem { --cor: #f59e0b; }
+.tabela-trans .t-meta { display: none; }
+.tabela-trans td.t-cat { white-space: normal; }
+@media (max-width: 1250px) {
+  .tabela-trans .t-meta { display: block; }
+  .tabela-trans .t-conta, .tabela-trans .t-data { display: none; }
+}
+.rodape-trans { display: flex; flex-wrap: wrap; gap: .4rem 1.25rem; align-items: center; padding-top: .8rem; margin-top: .25rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .88rem; }
+.rodape-trans b { color: var(--text); }
+.rodape-trans .total { margin-left: auto; font-size: 1rem; }
+.rodape-trans .total b.neg { color: var(--neg); } .rodape-trans .total b.pos { color: var(--pos); }
+.lanc.transf .lanc-valor { color: var(--muted); }
+
+/* ===================== Calendário */
+.cal-legenda { display: flex; flex-wrap: wrap; gap: .4rem 1rem; color: var(--muted); font-size: .82rem; }
+.cal-legenda span { display: inline-flex; align-items: center; gap: .35rem; }
+.cal-legenda i { width: .7rem; height: .7rem; border-radius: 3px; display: inline-block; }
+.cal-card { padding: .6rem; }
+.cal-semana, .cal-grade { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .35rem; }
+.cal-semana span { text-align: center; font-size: .75rem; font-weight: 700; text-transform: uppercase; color: var(--muted); padding: .3rem 0; }
+.cal-dia { min-height: 104px; display: flex; flex-direction: column; align-items: stretch; gap: .2rem; padding: .35rem; text-align: left; font: inherit; color: inherit;
+  background: var(--surface-2); border: 1px solid transparent; border-radius: 10px; cursor: pointer; min-width: 0; }
+.cal-dia:hover { border-color: var(--border); background: var(--surface); }
+.cal-dia.fora { opacity: .45; }
+.cal-dia.sel { border-color: var(--accent); background: var(--accent-soft); }
+.cal-num { font-weight: 700; font-size: .85rem; }
+.cal-dia.hoje .cal-num { background: var(--accent); color: var(--accent-ink); border-radius: 999px; width: 1.6rem; height: 1.6rem; display: grid; place-items: center; }
+.cal-barras { display: grid; gap: .18rem; min-width: 0; }
+.cal-barra { display: block; padding: .1rem .35rem; border-radius: 5px; font-size: .72rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: color-mix(in srgb, var(--cor) 16%, transparent); color: color-mix(in srgb, var(--cor) 80%, var(--text)); border-left: 3px solid var(--cor); }
+.cal-marca { display: block; font-size: .68rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-mais { font-size: .7rem; color: var(--muted); padding-left: .35rem; }
+.cal-pontos { display: none; }
+.check-linha.alternar { display: inline-flex; align-items: center; gap: .45rem; padding: .45rem .75rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-weight: 600; font-size: .88rem; cursor: pointer; }
+
+@media (max-width: 720px) {
+  .abas-trans { gap: .2rem; padding: .25rem; }
+  .abas-trans a { padding: .5rem .35rem; text-align: center; }
+  .abas-trans a span { font-size: .78rem; }
+  .abas-trans a small { font-size: .68rem; }
+  .abas-trans .ab-total { display: none; }
+  .filtros-lanc select, .filtros-lanc input { flex: 1 1 100%; min-width: 0; }
+  .tabela-trans thead { display: none; }
+  .tabela-trans tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .25rem .75rem; padding: .6rem 0; border-bottom: 1px solid var(--border); }
+  .tabela-trans tbody td { border: 0; padding: 0; }
+  .tabela-trans td.t-desc { grid-column: 1; grid-row: 1; }
+  .tabela-trans td.t-cat, .tabela-trans td.t-rota { grid-column: 1; grid-row: 2; }
+  .tabela-trans td.t-valor { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .tabela-trans .t-cat .tag { display: none; }
+  .tabela-trans td.t-desc { min-width: 0; }
+  .tabela-trans th:first-child { position: static; }
+  .rodape-trans .total { margin-left: 0; width: 100%; }
+  .cal-semana, .cal-grade { gap: .2rem; }
+  .cal-dia { min-height: 54px; padding: .25rem; align-items: center; }
+  .cal-barras { display: none; }
+  .cal-pontos { display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; }
+  .cal-pontos i { width: 6px; height: 6px; border-radius: 50%; }
+  .cal-pontos i.marca { background: transparent; border: 1.5px solid var(--muted); width: 5px; height: 5px; }
+}
