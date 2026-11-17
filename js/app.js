@@ -1,9 +1,9 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117003319';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117003319';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117003319';
-import { lerPlanilha } from './importer.js?v=20261117003319';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117003319';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117003319';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117004556';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117004556';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117004556';
+import { lerPlanilha } from './importer.js?v=20261117004556';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117004556';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117004556';
 
 const app = document.getElementById('app');
 const S = {
@@ -32,19 +32,52 @@ const grande = (v) => {
   return m ? `${m[1]}<small>${m[2]}</small>` : s;
 };
 
-/* tema: '' = automático (segue o aparelho), 'light' ou 'dark' */
-function temaAtual() { try { return localStorage.getItem('financas-tema') || ''; } catch { return ''; } }
+/* tema: 'light' (padrão), 'dark' ou 'auto' (segue o aparelho) */
+function temaAtual() { try { return localStorage.getItem('financas-tema') || 'light'; } catch { return 'light'; } }
 function definirTema(t) {
-  try { if (t) localStorage.setItem('financas-tema', t); else localStorage.removeItem('financas-tema'); } catch { /* sem armazenamento */ }
-  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem('financas-tema', t); } catch { /* sem armazenamento */ }
+  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
   render();
 }
 function seletorTema() {
   const t = temaAtual();
   return `<div class="tema" role="group" aria-label="Tema">
-    ${[['light', 'Claro'], ['', 'Auto'], ['dark', 'Escuro']].map(([v, n]) =>
+    ${[['light', 'Claro'], ['auto', 'Auto'], ['dark', 'Escuro']].map(([v, n]) =>
       `<button type="button" data-tema="${v}" class="${t === v ? 'ativo' : ''}" aria-pressed="${t === v}">${n}</button>`).join('')}
   </div>`;
+}
+
+/* modo de uso: 'organizacao' (planilha) ou 'controle' (extratos e categorias) */
+const MODOS = {
+  organizacao: {
+    nome: 'Organização',
+    texto: 'Como a planilha: você lança os totais do mês (receita, débito, cada cartão, investimento, saldo) e vê o resumo do mês e do ano.',
+  },
+  controle: {
+    nome: 'Controle',
+    texto: 'Para acompanhar tudo de perto: importa os extratos das contas e cartões, classifica cada gasto (pessoal ou empresa) e vê quanto foi para cada categoria.',
+  },
+};
+function modo() { return prefs().modo || 'organizacao'; }
+function ehControle() { return modo() === 'controle'; }
+async function definirModo(m) {
+  S.data.prefs[S.perfilId] = await S.store.savePrefs(S.perfilId, { ...prefs(), modo: m });
+}
+/** Cartões para escolher o modo (conta nova e Ajustes). */
+function escolhaModo(titulo = 'Como você vai usar o site?') {
+  const atual = prefs().modo;
+  return `<section class="card escolha-modo">
+    <h2>${titulo}</h2>
+    <div class="modos">
+      ${Object.entries(MODOS).map(([k, m]) => `
+        <button type="button" class="modo-op ${atual === k ? 'ativo' : ''}" data-modo="${k}" aria-pressed="${atual === k}">
+          <span class="modo-icone" aria-hidden="true">${k === 'controle' ? ICON.classificar : ICON.ano}</span>
+          <b>Modo ${m.nome}</b><span>${m.texto}</span>
+          ${atual === k ? '<em>Em uso</em>' : ''}
+        </button>`).join('')}
+    </div>
+    <p class="hint">Dá para trocar quando quiser em Ajustes. Nada é apagado ao trocar.</p>
+  </section>`;
 }
 const cats = () => [...S.data.categorias].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) || a.nome.localeCompare(b.nome));
 const anoAtual = () => new Date().getFullYear();
@@ -383,13 +416,7 @@ function render() {
   else if (r.view === 'ano') renderAno(main, r.ano, r.aba);
   else if (r.view === 'ajuda') renderAjuda(main);
   else renderAjustes(main);
-  bindShell();
-  // No celular a faixa de meses rola: centraliza o mês aberto
-  const faixa = app.querySelector('.faixa-meses');
-  const ativo = faixa?.querySelector('.ativo');
-  if (faixa && ativo && faixa.scrollWidth > faixa.clientWidth) {
-    faixa.scrollLeft = ativo.offsetLeft - faixa.clientWidth / 2 + ativo.clientWidth / 2;
-  }
+  bindShell(r);
 }
 
 function shell(r) {
@@ -398,16 +425,14 @@ function shell(r) {
   const ano = r.ano || anoAtual();
   // Telas por mês mantêm o mês aberto ao trocar de tela
   const sufixoMes = r.ano && r.mes ? `/${r.ano}/${r.mes}` : '';
-  // Contador do menu: gastos sem categoria + itens para conferir
-  const pendentes = S.user && S.autorizado !== false ? semClasse(S.data.lancamentos).length + conferir().length : 0;
+  const controle = ehControle();
+  // Contador do menu (modo controle): gastos sem categoria + itens para conferir
+  const pendentes = controle && S.user && S.autorizado !== false ? semClasse(S.data.lancamentos).length + conferir().length : 0;
   const email = S.user?.email || '';
-  const marca = '<div class="marca"><img src="icons/icon.svg" alt="" width="30" height="30"><span>Finanças Marques</span></div>';
-  return `
-  <div class="layout">
-    <aside class="lateral">
-      ${marca}
-      <nav class="nav" aria-label="Menu">
-        <span class="nav-titulo">Mês a mês</span>
+  const marca = `<div class="marca"><img src="icons/icon.svg" alt="" width="32" height="32">
+    <span>Finanças Marques<small>Modo ${MODOS[modo()].nome.toLowerCase()}</small></span></div>`;
+  const menu = controle
+    ? `<span class="nav-titulo">Mês a mês</span>
         ${item(`#/mes${sufixoMes}`, 'mes', 'Visão do mês', ICON.mes)}
         ${item(`#/lancamentos${sufixoMes}`, 'lancamentos', 'Lançamentos', ICON.lista)}
         ${item(`#/classificar${sufixoMes}`, 'classificar', 'Classificar', ICON.classificar, pendentes ? `<b class="badge">${pendentes > 99 ? '99+' : pendentes}</b>` : '')}
@@ -417,8 +442,19 @@ function shell(r) {
         ${item('#/geral', 'geral', 'Todos os anos', ICON.geral, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Configurar</span>
         ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
-        ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda, '', 'so-desktop')}
-      </nav>
+        ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda, '', 'so-desktop')}`
+    : `<span class="nav-titulo">Menu</span>
+        ${item(`#/mes${sufixoMes}`, 'mes', 'Visão do mês', ICON.mes)}
+        ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano)}
+        ${item('#/geral', 'geral', 'Todos os anos', ICON.geral)}
+        <span class="nav-titulo nav-sep">Configurar</span>
+        ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
+        ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda)}`;
+  return `
+  <div class="layout">
+    <aside class="lateral">
+      ${marca}
+      <nav class="nav" aria-label="Menu">${menu}</nav>
       ${seletorTema()}
       <div class="lateral-pe">
         <span class="avatar">${esc((email[0] || '?').toUpperCase())}</span>
@@ -426,34 +462,47 @@ function shell(r) {
       </div>
     </aside>
     <div class="conteudo">
-      <header class="topo">
-        ${marca}
-        <button class="btn primario lancar" data-acao="lancar">${ICON.mais}<span>Lançar mês</span></button>
-      </header>
+      <header class="topo">${marca}</header>
       ${S.store.mode === 'local' ? '<div class="aviso">Modo local: os dados ficam só neste navegador.</div>' : ''}
       <main></main>
     </div>
   </div>`;
 }
 
-function bindShell() {
+function bindShell(r) {
   app.querySelectorAll('[data-tema]').forEach((b) => b.addEventListener('click', () => definirTema(b.dataset.tema)));
-  app.querySelector('[data-acao="lancar"]')?.addEventListener('click', () => {
-    const d = new Date();
-    const r = rota();
-    if (r.view === 'mes') { abrirEditor(r.ano, r.mes); return; }
-    // Sugere o último mês lançado + 1, ou o mês atual
-    const ultimos = efetivos().filter(mesTemDados).sort((a, b) => b.ano - a.ano || b.mes - a.mes);
-    let ano = d.getFullYear(), mes = d.getMonth() + 1;
-    if (r.view === 'ano' && r.ano !== ano) { ano = r.ano; mes = 1; }
-    if (ultimos.length && r.view !== 'ano') {
-      const u = ultimos[0];
-      const proximo = u.mes === 12 ? { ano: u.ano + 1, mes: 1 } : { ano: u.ano, mes: u.mes + 1 };
-      if (proximo.ano * 100 + proximo.mes <= ano * 100 + mes) ({ ano, mes } = proximo);
-    }
-    abrirEditor(ano, mes);
-  });
+  // Escolha do modo de uso
+  app.querySelectorAll('[data-modo]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      await definirModo(b.dataset.modo);
+      toast(`Modo ${MODOS[b.dataset.modo].nome} ativado.`);
+      render();
+    } catch (e) { toast(e.message, 'erro'); }
+  }));
+  // Importar extrato a partir da Visão do mês (modo controle)
+  app.querySelectorAll('[data-a="importar-mes"]').forEach((b) => b.addEventListener('click', () => abrirImportacao({ ano: r.ano || anoAtual(), mes: r.mes || new Date().getMonth() + 1 })));
+  // Seletor de mês (popover)
+  const btn = app.querySelector('.titulo-mes');
+  const pop = app.querySelector('.seletor-mes .popover');
+  if (btn && pop) {
+    const fechar = () => { pop.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pop.hidden = !pop.hidden;
+      btn.setAttribute('aria-expanded', String(!pop.hidden));
+    });
+    pop.addEventListener('click', (e) => e.stopPropagation());
+    btn.addEventListener('keydown', (e) => { if (e.key === 'Escape') fechar(); });
+  }
 }
+// Clique fora fecha o seletor de mês (um único ouvinte para o site todo)
+document.addEventListener('click', () => {
+  const pop = document.querySelector('.seletor-mes .popover');
+  if (pop && !pop.hidden) {
+    pop.hidden = true;
+    document.querySelector('.titulo-mes')?.setAttribute('aria-expanded', 'false');
+  }
+});
 
 /* =========================================================== login view */
 function renderLogin(modo = 'entrar') {
@@ -565,11 +614,11 @@ function renderMes(main, ano, mes) {
   const vsAnt = `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`;
 
   const topo = `
-    ${cabecalhoMes(ano, mes, '#/mes', `
-      <a class="btn" href="#/lancamentos/${ano}/${mes}">${ICON.lista}<span>Lançamentos</span></a>
-      ${l.temDados ? `<button class="btn primario" data-a="editar">${ICON.editar}<span>Editar mês</span></button>` : ''}`)}
-    <p class="sub descricao">O resumo do mês: quanto sobrou, para onde foi o dinheiro e como foi em relação ao mês anterior.
-      <a href="#/ajuda">Como usar</a></p>`;
+    ${cabecalhoMes(ano, mes, '#/mes', ehControle()
+      ? `<a class="btn" href="#/lancamentos/${ano}/${mes}">${ICON.lista}<span>Lançamentos</span></a>
+         <button class="btn primario" data-a="importar-mes">${ICON.upload}<span>Importar extrato</span></button>`
+      : `<button class="btn primario" data-a="editar">${l.temDados ? ICON.editar : ICON.mais}<span>${l.temDados ? 'Editar mês' : 'Lançar mês'}</span></button>`)}
+    ${!prefs().modo ? escolhaModo() : ''}`;
 
   if (!efetivos().some(mesTemDados)) {
     // Conta nova: guia de primeiros passos
@@ -582,11 +631,16 @@ function renderMes(main, ano, mes) {
     main.innerHTML = `${topo}
       <section class="card primeiros">
         <h2>Primeiros passos</h2>
-        <p class="sub">Três passos para começar. Dúvidas sobre algum termo? Veja a <a href="#/ajuda">Ajuda</a>.</p>
+        <p class="sub">Dúvidas sobre algum termo? Veja a <a href="#/ajuda">Ajuda</a>.</p>
         <ol class="checklist">
-          ${passo(temCats, 'Cadastrar cartões e categorias', 'Um item para cada cartão de crédito e para os gastos no débito (pessoais e da empresa).', '<a class="btn" href="#/ajustes">Abrir Ajustes</a>')}
-          ${passo(false, 'Trazer o histórico (opcional)', 'Se existir a planilha FINANÇAS GERAIS.xlsx, importe em Ajustes e todos os meses aparecem aqui.', '<a class="btn" href="#/ajustes">Importar planilha</a>')}
-          ${passo(false, `Lançar ${MESES[mes - 1].toLowerCase()} de ${ano}`, 'Receita, débito, fatura de cada cartão, investimento e o saldo do dia 1º.', '<button class="btn primario" data-a="editar">Lançar este mês</button>')}
+          ${ehControle() ? `
+            ${passo(temCats, 'Cadastrar as contas e cartões', 'Ex.: "Santander pessoal", "Santander Empresas", "Cartão Santander".', '<a class="btn" href="#/ajustes">Abrir Ajustes</a>')}
+            ${passo(S.data.classes.length > 0, 'Criar as categorias de gasto', 'Funcionários, Fornecedores, Mercado… Comece pelas sugeridas.', '<a class="btn" href="#/ajustes#classes">Categorias</a>')}
+            ${passo(false, 'Importar o extrato do mês', 'Um arquivo OFX ou CSV por conta ou cartão. Depois é só classificar.', '<button class="btn primario" data-a="importar-mes">Importar extrato</button>')}`
+          : `
+            ${passo(temCats, 'Cadastrar contas e cartões', 'Um item para cada cartão de crédito e um para o débito (as colunas da sua planilha).', '<a class="btn" href="#/ajustes">Abrir Ajustes</a>')}
+            ${passo(false, 'Trazer o histórico (opcional)', 'Se existir a planilha FINANÇAS GERAIS.xlsx, importe em Ajustes e todos os meses aparecem aqui.', '<a class="btn" href="#/ajustes">Importar planilha</a>')}
+            ${passo(false, `Lançar ${MESES[mes - 1].toLowerCase()} de ${ano}`, 'Receita, débito, fatura de cada cartão, investimento e o saldo do dia 1º.', '<button class="btn primario" data-a="editar">Lançar este mês</button>')}`}
         </ol>
       </section>`;
     main.querySelectorAll('[data-a="editar"]').forEach((b) => b.addEventListener('click', () => abrirEditor(ano, mes)));
@@ -596,9 +650,13 @@ function renderMes(main, ano, mes) {
   if (!l.temDados) {
     main.innerHTML = `${topo}
       <section class="card vazio">
-        <h2>${MESES[mes - 1]} de ${ano} ainda não foi lançado</h2>
-        <p>Lance a receita, os gastos no débito e nos cartões, o investimento e o saldo do dia 1º.</p>
-        <div class="acoes"><button class="btn primario" data-a="editar">Lançar ${MESES[mes - 1]}</button></div>
+        <h2>${MESES[mes - 1]} de ${ano} ainda não tem dados</h2>
+        ${ehControle()
+          ? `<p>Importe os extratos das contas e cartões deste mês.</p>
+             <div class="acoes"><button class="btn primario" data-a="importar-mes">Importar extrato</button>
+             <a class="btn" href="#/lancamentos/${ano}/${mes}">Lançar à mão</a></div>`
+          : `<p>Lance a receita, os gastos no débito e nos cartões, o investimento e o saldo do dia 1º.</p>
+             <div class="acoes"><button class="btn primario" data-a="editar">Lançar ${MESES[mes - 1]}</button></div>`}
       </section>`;
     main.querySelectorAll('[data-a="editar"]').forEach((b) => b.addEventListener('click', () => abrirEditor(ano, mes)));
     return;
@@ -704,7 +762,8 @@ function renderMes(main, ano, mes) {
       </section>
 
       ${(() => {
-        // Gastos por categoria de gasto + pessoal × empresa (vem dos lançamentos)
+        // Gastos por categoria de gasto + pessoal × empresa (vem dos lançamentos) — só no modo Controle
+        if (!ehControle()) return '';
         const gastos = S.data.lancamentos.filter((x) => x.destino === 'despesa' && String(x.data).startsWith(`${ano}-${pad2(mes)}`));
         if (!gastos.length) return '';
         const tot = gastos.reduce((s, x) => s + x.valor, 0);
@@ -729,6 +788,7 @@ function renderMes(main, ano, mes) {
       })()}
 
       ${(() => {
+        if (!ehControle()) return '';
         const doMes = S.data.lancamentos.filter((x) => String(x.data).startsWith(`${ano}-${pad2(mes)}`))
           .sort((a, b) => b.data.localeCompare(a.data)).slice(0, 6);
         if (!doMes.length) return '';
@@ -788,28 +848,47 @@ function totalDigitado(ano, mes, campo) {
   return v === undefined ? null : v;
 }
 
-/** Cabeçalho comum das telas por mês: setas, nome do mês e a faixa com os 12 meses. */
+/**
+ * Barra do topo das telas por mês (como na referência): ‹ › e o nome do mês à esquerda;
+ * clicar no nome abre um seletor com os 12 meses; ações à direita.
+ */
 function cabecalhoMes(ano, mes, base, acoes = '') {
   const pa = anterior(ano, mes), px = seguinte(ano, mes);
   const map = indexMeses(efetivos());
   const hoje = new Date();
   const ehHoje = hoje.getFullYear() === ano && hoje.getMonth() + 1 === mes;
   return `
-    <div class="mes-topo">
-      <a class="btn icone" href="${base}/${pa.ano}/${pa.mes}" aria-label="Mês anterior">‹</a>
-      <a class="btn icone" href="${base}/${px.ano}/${px.mes}" aria-label="Próximo mês">›</a>
-      <h1>${MESES[mes - 1]} <span>${ano}</span></h1>
-      ${ehHoje ? '' : `<a class="btn fantasma" href="${base}/${hoje.getFullYear()}/${hoje.getMonth() + 1}">Mês atual</a>`}
-      <div class="mes-acoes">${acoes}</div>
-    </div>
-    <nav class="faixa-meses" aria-label="Meses de ${ano}">
-      ${MESES_CURTO.map((m, i) => {
-        const tem = mesTemDados(map.get(ano * 100 + i + 1));
-        return `<a href="${base}/${ano}/${i + 1}" class="${i + 1 === mes ? 'ativo' : ''} ${tem ? 'com-dados' : ''}"
-          title="${MESES[i]} de ${ano}: ${tem ? 'lançado' : 'sem lançamentos'}" ${i + 1 === mes ? 'aria-current="date"' : ''}>
-          <span>${m}</span><i aria-hidden="true"></i></a>`;
-      }).join('')}
-    </nav>`;
+    <div class="barra-pagina">
+      <div class="barra-esq">
+        <a class="btn icone discreto" href="${base}/${pa.ano}/${pa.mes}" aria-label="Mês anterior">‹</a>
+        <a class="btn icone discreto" href="${base}/${px.ano}/${px.mes}" aria-label="Próximo mês">›</a>
+        <div class="seletor-mes">
+          <button type="button" class="titulo-mes" aria-haspopup="true" aria-expanded="false">
+            ${MESES[mes - 1]} <span>${ano}</span> <i aria-hidden="true">▾</i></button>
+          <div class="popover" hidden>
+            <div class="pop-ano">
+              <a class="btn icone discreto" href="${base}/${ano - 1}/${mes}" aria-label="Ano anterior">‹</a>
+              <b>${ano}</b>
+              <a class="btn icone discreto" href="${base}/${ano + 1}/${mes}" aria-label="Próximo ano">›</a>
+            </div>
+            <div class="pop-grid">
+              ${MESES_CURTO.map((m, i) => {
+                const tem = mesTemDados(map.get(ano * 100 + i + 1));
+                return `<a href="${base}/${ano}/${i + 1}" class="${i + 1 === mes ? 'ativo' : ''} ${tem ? 'com-dados' : ''}"
+                  title="${MESES[i]}: ${tem ? 'com dados' : 'sem dados'}">${m}<i aria-hidden="true"></i></a>`;
+              }).join('')}
+            </div>
+            ${ehHoje ? '' : `<a class="pop-hoje" href="${base}/${hoje.getFullYear()}/${hoje.getMonth() + 1}">Ir para o mês atual</a>`}
+          </div>
+        </div>
+      </div>
+      <div class="barra-dir">${acoes}</div>
+    </div>`;
+}
+
+/** Barra simples para telas que não são por mês. */
+function cabecalhoSimples(titulo, acoes = '') {
+  return `<div class="barra-pagina"><div class="barra-esq"><h1>${titulo}</h1></div><div class="barra-dir">${acoes}</div></div>`;
 }
 
 function renderLancamentos(main, ano, mes) {
@@ -853,8 +932,6 @@ function renderLancamentos(main, ano, mes) {
     ${cabecalhoMes(ano, mes, '#/lancamentos', `
       <button class="btn" data-a="importar">${ICON.upload}<span>Importar extrato</span></button>
       <button class="btn primario" data-a="novo">${ICON.mais}<span>Novo lançamento</span></button>`)}
-    <p class="sub descricao">Cada gasto ou entrada, um por um. Use para lançar aos poucos (por semana) ou importar o extrato do banco —
-      movimentações já importadas são puladas automaticamente. <a href="#/ajuda">Como funciona</a></p>
 
     <section class="mini-kpis">
       <div class="card"><span>Entradas</span><strong class="pos">${fmtBRL(entradas)}</strong></div>
@@ -1340,8 +1417,6 @@ function renderClassificar(main, ano, mes) {
     ${cabecalhoMes(ano, mes, '#/classificar', `
       <button class="btn" data-a="aplicar-regras" title="Usa as regras salvas nos lançamentos ainda sem categoria">Aplicar regras</button>
       <a class="btn" href="#/categorias/${ano}/${mes}">Ver categorias</a>`)}
-    <p class="sub descricao">Primeiro confira o que o site achou de estranho (transferências entre suas contas, fatura contada duas vezes, repetidos).
-      Depois classifique: os gastos parecidos vêm juntos, um clique na categoria classifica o grupo e, com "lembrar", os próximos meses já vêm classificados.</p>
 
     ${!cl.length ? cardSemClasses() : ''}
 
@@ -1456,11 +1531,13 @@ function renderCategorias(main, ano, mes) {
   const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
 
   const cab = porAno
-    ? `<div class="mes-topo">
-        <a class="btn icone" href="#/categorias/${ano - 1}" aria-label="Ano anterior">‹</a>
-        <a class="btn icone" href="#/categorias/${ano + 1}" aria-label="Próximo ano">›</a>
-        <h1>Categorias <span>${ano}</span></h1>
-        <div class="mes-acoes"><div class="abas"><a href="#/categorias/${ano}/${new Date().getMonth() + 1}">Mês</a><a class="ativo" href="#/categorias/${ano}">Ano inteiro</a></div></div>
+    ? `<div class="barra-pagina">
+        <div class="barra-esq">
+          <a class="btn icone discreto" href="#/categorias/${ano - 1}" aria-label="Ano anterior">‹</a>
+          <a class="btn icone discreto" href="#/categorias/${ano + 1}" aria-label="Próximo ano">›</a>
+          <span class="titulo-mes">${ano}</span>
+        </div>
+        <div class="barra-dir"><div class="abas"><a href="#/categorias/${ano}/${new Date().getMonth() + 1}">Mês</a><a class="ativo" href="#/categorias/${ano}">Ano inteiro</a></div></div>
       </div>`
     : cabecalhoMes(ano, mes, '#/categorias', `<div class="abas"><a class="ativo" href="#/categorias/${ano}/${mes}">Mês</a><a href="#/categorias/${ano}">Ano inteiro</a></div>`);
 
@@ -1479,7 +1556,6 @@ function renderCategorias(main, ano, mes) {
 
   main.innerHTML = `
     ${cab}
-    <p class="sub descricao">Quanto foi gasto com cada coisa${porAno ? ' no ano' : ' no mês'}, juntando todas as contas e cartões. Toque numa categoria para ver as compras.</p>
 
     <section class="mini-kpis">
       <div class="card"><span>Gastos ${fc.escopo !== 'todos' ? `(${LADO[fc.escopo].toLowerCase()})` : ''}</span><strong>${fmtBRL(total)}</strong></div>
@@ -1678,9 +1754,7 @@ function renderGeral(main) {
   const periodo = !comDados.length ? '' : !iv ? 'Todos os anos'
     : `${ymTexto(ym(comDados[0]))} a ${ymTexto(ym(comDados[comDados.length - 1]))}`;
   const cabecalho = `
-    <div class="titulo">
-      <div><h1>Todos os anos</h1><p class="sub">A soma de todos os anos lançados. Use o filtro para ver um período ou só alguns cartões. · ${periodo}${periodo ? ' · ' : ''}${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês lançado' : 'meses lançados'}${f.cats ? ' · despesas filtradas' : ''}</p></div>
-    </div>
+    ${cabecalhoSimples('Todos os anos', `<span class="sub">${periodo}${periodo ? ' · ' : ''}${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês' : 'meses'}${f.cats ? ' · filtrado' : ''}</span>`)}
     ${filtroHTML(f, todasCats)}`;
 
   if (!comDados.length) {
@@ -1790,21 +1864,19 @@ function cabecalhoAno(ano, aba, st) {
   const anos = [...new Set([...anosComDados(efetivos()), anoAtual(), ano, ano - 1, ano + 1])].sort((a, b) => a - b);
   const sufixo = aba === 'planilha' ? '/planilha' : '';
   return `
-    <div class="titulo">
-      <div class="seletor-ano">
-        <a class="btn icone" href="#/ano/${ano - 1}${sufixo}" aria-label="Ano anterior">‹</a>
-        <select aria-label="Ano">${anos.map((a) => `<option ${a === ano ? 'selected' : ''}>${a}</option>`).join('')}</select>
-        <a class="btn icone" href="#/ano/${ano + 1}${sufixo}" aria-label="Próximo ano">›</a>
+    <div class="barra-pagina">
+      <div class="barra-esq seletor-ano">
+        <a class="btn icone discreto" href="#/ano/${ano - 1}${sufixo}" aria-label="Ano anterior">‹</a>
+        <a class="btn icone discreto" href="#/ano/${ano + 1}${sufixo}" aria-label="Próximo ano">›</a>
+        <select class="titulo-mes" aria-label="Ano">${anos.map((a) => `<option ${a === ano ? 'selected' : ''}>${a}</option>`).join('')}</select>
       </div>
-      <div class="abas" role="tablist">
-        <a role="tab" href="#/ano/${ano}" class="${aba === 'resumo' ? 'ativo' : ''}" aria-selected="${aba === 'resumo'}">Resumo do ano</a>
-        <a role="tab" href="#/ano/${ano}/planilha" class="${aba === 'planilha' ? 'ativo' : ''}" aria-selected="${aba === 'planilha'}">Planilha (mês a mês)</a>
+      <div class="barra-dir">
+        <div class="abas" role="tablist">
+          <a role="tab" href="#/ano/${ano}" class="${aba === 'resumo' ? 'ativo' : ''}" aria-selected="${aba === 'resumo'}">Resumo</a>
+          <a role="tab" href="#/ano/${ano}/planilha" class="${aba === 'planilha' ? 'ativo' : ''}" aria-selected="${aba === 'planilha'}">Planilha</a>
+        </div>
       </div>
-    </div>
-    <p class="sub descricao">${aba === 'resumo'
-      ? 'O ano inteiro em um só lugar: quanto entrou, quanto saiu, para onde foi o dinheiro e como o saldo evoluiu.'
-      : 'Igual à aba do ano na planilha: um mês por linha, com as informações gerais ao lado. Toque num mês para lançar ou editar.'}
-      ${st.mesesComDados ? ` · ${st.mesesComDados} de 12 meses lançados` : ''}</p>`;
+    </div>`;
 }
 
 function bindCabecalhoAno(main, aba) {
@@ -2312,7 +2384,7 @@ const GLOSSARIO = [
 
 function renderAjuda(main) {
   main.innerHTML = `
-    <div class="titulo"><div><h1>Ajuda</h1><p class="sub">Como usar o Finanças Marques, passo a passo.</p></div></div>
+    ${cabecalhoSimples('Ajuda')}
 
     <div class="ajuda-grid">
       <section class="card">
@@ -2332,9 +2404,9 @@ function renderAjuda(main) {
         <h2>Para que serve cada tela</h2>
         <dl class="lista telas">
           <div><dt>${ICON.mes} Mês</dt><dd>O resumo de um mês: quanto sobrou, para onde foi o dinheiro, cada cartão e a comparação com o mês anterior. É a tela do dia a dia.</dd></div>
-          <div><dt>${ICON.lista} Lançamentos</dt><dd>Cada gasto ou entrada, um por um, com data e se é pessoal ou da empresa. Também é onde se importa o extrato do banco.</dd></div>
+          ${ehControle() ? `<div><dt>${ICON.lista} Lançamentos</dt><dd>Cada gasto ou entrada, um por um, com data e se é pessoal ou da empresa. Também é onde se importa o extrato do banco.</dd></div>
           <div><dt>${ICON.classificar} Classificar</dt><dd>Os gastos sem categoria, agrupados por descrição. Um clique na categoria classifica o grupo e cria a regra para os próximos meses.</dd></div>
-          <div><dt>${ICON.categorias} Categorias</dt><dd>Quanto foi para cada categoria (Funcionários, Assinaturas…) no mês ou no ano, de todas as contas juntas, com filtro pessoal/empresa.</dd></div>
+          <div><dt>${ICON.categorias} Categorias</dt><dd>Quanto foi para cada categoria (Funcionários, Assinaturas…) no mês ou no ano, de todas as contas juntas, com filtro pessoal/empresa.</dd></div>` : ''}
           <div><dt>${ICON.ano} Ano · Resumo</dt><dd>O ano inteiro: total que entrou e saiu, divisão por cartão/categoria, melhores e piores meses, investimentos e evolução do saldo.</dd></div>
           <div><dt>${ICON.ano} Ano · Planilha</dt><dd>Igual à aba do ano no Excel: um mês por linha e as informações gerais ao lado. Toque num mês para editar.</dd></div>
           <div><dt>${ICON.geral} Todos os anos</dt><dd>Soma de todos os anos, com filtro por período e por cartão/categoria.</dd></div>
@@ -2342,7 +2414,7 @@ function renderAjuda(main) {
         </dl>
       </section>
 
-      <section class="card largo destaque-acao">
+      ${ehControle() ? `<section class="card largo destaque-acao">
         <h2>Rotina com extratos (todo dia 1º)</h2>
         <ol class="passos">
           <li>No app/site de cada banco, baixe o extrato do mês que terminou em <b>OFX</b> (ou CSV): conta da empresa, cartão da empresa, conta pessoal, cartão pessoal…</li>
@@ -2372,9 +2444,9 @@ function renderAjuda(main) {
           <li>Ao importar, cada movimentação do banco tem uma identidade. <b>Importar o mesmo extrato de novo, ou um que repete dias, pula o que já entrou.</b></li>
           <li>Ao lançar à mão algo com mesma data, valor e descrição de um lançamento existente, o site <b>avisa antes de salvar</b>.</li>
           <li>Na importação, o que parece repetido de um lançamento manual vem <b>desmarcado</b> para você conferir.</li>
-          <li>Pagamento da fatura do cartão e transferência entre contas: marque como <b>Ignorar</b> (não é gasto).</li>
+          <li>Pagamento da fatura do cartão e dinheiro entre as suas contas entram como <b>Transferência</b> (não contam como gasto nem receita).</li>
         </ul>
-      </section>
+      </section>` : ''}
 
       <section class="card">
         <h2>Configurar uma conta nova</h2>
@@ -2417,11 +2489,12 @@ function renderAjustes(main) {
   const usada = (id) => S.data.lancamentos.some((l) => l.categoria_id === id) || S.data.meses.some((m) => m.despesas && m.despesas[id] !== undefined && m.despesas[id] !== null);
   const p = prefs();
   main.innerHTML = `
-    <div class="titulo"><div><h1>Ajustes</h1><p class="sub">Configure o que o site usa nos cálculos. Conta: ${esc(S.user.email || '')}</p>
-      <p class="sub"><a href="#/ajuda">Ajuda (como usar)</a> · <a href="#/geral">Todos os anos</a></p></div></div>
+    ${cabecalhoSimples('Ajustes', '<a class="btn" href="#/ajuda">Ajuda</a>')}
+
+    ${escolhaModo('Modo de uso')}
 
     <section class="card">
-      <h2>1. Contas e cartões</h2>
+      <h2>Contas e cartões</h2>
       <p class="sub"><b>De onde sai o dinheiro.</b> Um item para cada conta ou cartão (ex.: "Conta empresa", "Cartão empresa", "Conta pessoal", "Cartão Nubank").
         <b>Crédito</b> para cartões, <b>Débito</b> para o que sai direto da conta (Pix, boleto, débito). Também viram as colunas da planilha do ano.</p>
       <div class="lista-cat">
@@ -2448,8 +2521,8 @@ function renderAjustes(main) {
       </form>
     </section>
 
-    <section class="card" id="classes">
-      <h2>2. Categorias de gasto</h2>
+    ${ehControle() ? `<section class="card" id="classes">
+      <h2>Categorias de gasto</h2>
       <p class="sub"><b>Com o que foi gasto</b>, de qualquer conta: Funcionários, Assinaturas, Telefone… O <b>lado padrão</b> decide sozinho se o gasto é
         pessoal ou da empresa ao classificar (ex.: Funcionários = Empresa). "Depende" mantém o que estiver no lançamento.</p>
       ${!S.data.classes.length ? '<div class="acoes"><button class="btn primario" data-a="sugeridas">Criar categorias sugeridas</button></div>' : ''}
@@ -2481,7 +2554,7 @@ function renderAjustes(main) {
     </section>
 
     <section class="card" id="regras">
-      <h2>3. Regras automáticas</h2>
+      <h2>Regras automáticas</h2>
       <p class="sub">Quando a descrição de um gasto contém o texto, ele já entra com essa categoria (e lado). As regras são criadas na tela
         <a href="#/classificar">Classificar</a>; aqui dá para ajustar o texto (ex.: deixar só "joao silva") ou apagar.</p>
       ${!S.data.regras.length ? '<p class="sub"><i>Nenhuma regra ainda.</i></p>' : `
@@ -2514,8 +2587,10 @@ function renderAjustes(main) {
       </form>
     </section>
 
+    ` : ''}
+
     <section class="card">
-      <h2>4. Metas</h2>
+      <h2>Metas</h2>
       <p class="sub">Calculadas sobre a receita: quanto investir, quantos meses de reserva ter e o máximo para gastar. Aparecem nas telas Mês e Ano.</p>
       <form class="prefs">
         <label class="campo"><span>% esperado para investir</span><input name="pct_investir" inputmode="decimal" value="${fmtNum(p.pct_investir * 100)}"></label>
@@ -2526,7 +2601,7 @@ function renderAjustes(main) {
     </section>
 
     <section class="card">
-      <h2>5. Importar planilha do Excel</h2>
+      <h2>Importar planilha do Excel</h2>
       <p class="sub">Selecione o arquivo <b>FINANÇAS GERAIS.xlsx</b>. As abas de ano (2026, 2027…) são lidas aqui no navegador; meses que já existirem no site serão substituídos.</p>
       <label class="btn arquivo">Escolher planilha…<input type="file" accept=".xlsx,.xls" data-a="xlsx" hidden></label>
       <div class="import-preview"></div>
@@ -2539,7 +2614,7 @@ function renderAjustes(main) {
     </section>
 
     <section class="card">
-      <h2>6. Backup</h2>
+      <h2>Backup</h2>
       <p class="sub">Baixe uma cópia de todos os dados (JSON) ou restaure um backup.</p>
       <div class="acoes">
         <button class="btn" data-a="exportar">Baixar backup</button>
@@ -2626,7 +2701,7 @@ function renderAjustes(main) {
       } catch (e) { toast(e.message, 'erro'); }
     });
   });
-  main.querySelector('.nova-classe').addEventListener('submit', async (e) => {
+  main.querySelector('.nova-classe')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = e.target;
     try {
@@ -2678,7 +2753,7 @@ function renderAjustes(main) {
       toast('Preferências salvas.');
     } catch (ex) { toast(ex.message, 'erro'); }
   });
-  main.querySelector('.meus-nomes').addEventListener('submit', async (e) => {
+  main.querySelector('.meus-nomes')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const nomes = [...new Set(e.target.nomes.value.split('\n').map((x) => x.trim()).filter((x) => x.length >= 4))].slice(0, 30);
     try {

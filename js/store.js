@@ -10,12 +10,12 @@
 //     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
 //     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261117003319';
+import { uid } from './util.js?v=20261117004556';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
 // meus_nomes: nomes que identificam as próprias contas (Pix/TED com eles = transferência entre contas)
-export const PREFS_PADRAO = { pct_investir: 0.15, meses_reserva: 6, pct_max_gasto: 0.7, meus_nomes: [] };
+export const PREFS_PADRAO = { pct_investir: 0.15, meses_reserva: 6, pct_max_gasto: 0.7, meus_nomes: [], modo: null };
 
 export async function createStore() {
   const cfg = window.FIN_CONFIG || {};
@@ -182,7 +182,7 @@ async function supabaseStore(cfg) {
   const CLASSE_COLS = 'id, perfil_id, nome, cor, ordem, ativo, escopo_padrao';
   const REGRA_COLS = 'id, perfil_id, texto, classe_id, escopo';
   const MES_COLS = 'perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao';
-  const PREF_COLS = 'perfil_id, pct_investir, meses_reserva, pct_max_gasto, meus_nomes';
+  const PREF_COLS = 'perfil_id, pct_investir, meses_reserva, pct_max_gasto, meus_nomes, modo';
   const LANC_COLS = 'id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave, sentido';
 
   const comId = (row, x) => (x.id ? { ...row, id: x.id } : row);
@@ -284,6 +284,7 @@ async function supabaseStore(cfg) {
       const row = {
         perfil_id: perfilId, pct_investir: p.pct_investir, meses_reserva: p.meses_reserva, pct_max_gasto: p.pct_max_gasto,
         meus_nomes: Array.isArray(p.meus_nomes) ? p.meus_nomes : [],
+        modo: p.modo === 'controle' || p.modo === 'organizacao' ? p.modo : null,
       };
       const salvo = check(await sb.from('fin_preferencias').upsert(row, { onConflict: 'user_id,perfil_id' }).select(PREF_COLS).single());
       const { perfil_id: _id, ...resto } = salvo;

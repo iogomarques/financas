@@ -253,3 +253,7 @@ alter table public.fin_lancamentos add constraint fin_lancamentos_categoria_ok
   check (destino <> 'despesa' or categoria_id is not null);
 alter table public.fin_lancamentos add column if not exists sentido text check (sentido in ('entrada', 'saida'));
 alter table public.fin_preferencias add column if not exists meus_nomes text[] not null default '{}';
+
+-- Modo de uso (aplicado em 17/11/2026): 'organizacao' (planilha) ou 'controle' (extratos e categorias).
+-- Vazio = ainda não escolheu (o site pergunta).
+alter table public.fin_preferencias add column if not exists modo text check (modo in ('organizacao', 'controle'));
