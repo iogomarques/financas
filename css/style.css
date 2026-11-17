@@ -735,6 +735,66 @@ select.titulo-mes { appearance: none; -webkit-appearance: none; padding-right: .
 .modo-icone { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
 
 /* =====================================================================
+   Resumo e Contas (modo Controle)
+   ===================================================================== */
+.resumo-topo { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 1rem; align-items: stretch; }
+.saldo-pilha { display: grid; gap: .55rem; margin-top: .2rem; }
+.sp-linha { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; gap: .6rem; padding: .55rem .7rem; border-radius: 12px; background: var(--surface-2); font-size: .9rem; }
+.sp-linha span:nth-child(2) { color: var(--muted); font-weight: 600; }
+.sp-icone { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; }
+.sp-linha.entrada .sp-icone { background: color-mix(in srgb, var(--pos) 15%, transparent); color: var(--pos); }
+.sp-linha.entrada b { color: var(--pos); }
+.sp-linha.saida .sp-icone { background: color-mix(in srgb, var(--neg) 13%, transparent); color: var(--neg); }
+.sp-linha.saida b { color: var(--neg); }
+.sp-saldo { text-align: center; padding: .4rem 0; }
+.sp-saldo strong { font-size: clamp(1.9rem, 3vw, 2.5rem); letter-spacing: -.02em; }
+.sp-saldo strong small { font-size: .55em; }
+.visao-geral { display: grid; align-content: start; }
+.visao-geral h2.secao { margin-top: 0; }
+.vg-grade { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.vg { display: flex; gap: .85rem; align-items: flex-start; }
+.vg > div { display: grid; gap: .15rem; min-width: 0; }
+.vg strong { font-size: 1.3rem; letter-spacing: -.01em; }
+.vg span { color: var(--muted); font-size: .85rem; }
+.vg-icone { flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; font-size: 1.3rem; font-weight: 800; color: #fff; }
+.vg-icone svg { width: 22px; height: 22px; }
+.vg-icone.azul { background: #3b82f6; }
+.vg-icone.verde { background: #10b981; }
+.vg-icone.vermelho { background: #ef4444; }
+.vg-icone.amarelo { background: #f59e0b; }
+.chip-var { justify-self: start; margin-top: .25rem; padding: .1rem .55rem; border-radius: 999px; font-size: .74rem; font-weight: 700; }
+.chip-var.bom { background: color-mix(in srgb, var(--pos) 14%, transparent); color: var(--pos); }
+.chip-var.ruim { background: color-mix(in srgb, var(--neg) 12%, transparent); color: var(--neg); }
+.chip-var.neutro { background: var(--surface-2); color: var(--muted); }
+.resumo-grid { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr); gap: 1rem; align-items: start; }
+.faixa-aviso {
+  display: flex; align-items: center; gap: .7rem; padding: .6rem .9rem; border-radius: 14px;
+  background: color-mix(in srgb, var(--aviso) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--aviso) 35%, var(--border)); color: var(--text);
+}
+.faixa-aviso span { flex: 1; font-weight: 600; }
+.faixa-aviso svg { color: var(--aviso); }
+.tabela-leve th, .tabela-leve td { padding: .65rem .55rem; }
+.tabela-leve thead th { min-width: 0; }
+.tabela-leve tbody th { font-weight: 600; }
+.conta-nome { display: flex; align-items: center; gap: .6rem; }
+.conta-nome > span:last-child { display: grid; line-height: 1.25; }
+.conta-nome small { color: var(--muted); font-weight: 500; font-size: .76rem; }
+.avatar-conta {
+  flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--cv-bg); color: var(--cv-tx); font-weight: 800; font-size: .85rem; box-shadow: 0 2px 6px rgba(15, 23, 42, .18);
+}
+.transf-info { display: block; color: var(--muted); font-size: .72rem; white-space: nowrap; }
+.lanc-lado { display: grid; justify-items: end; }
+.lanc-lado small { color: var(--muted); font-size: .76rem; }
+.ver-todas { display: block; margin-top: .6rem; font-weight: 600; font-size: .9rem; }
+@media (max-width: 1100px) {
+  .resumo-topo, .resumo-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .vg-grade { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* =====================================================================
    Ilustrações, cartões desenhados e cartões por ano
    ===================================================================== */
 .card-cab { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; margin-bottom: .6rem; }

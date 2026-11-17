@@ -10,7 +10,7 @@
 //     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
 //     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261117010216';
+import { uid } from './util.js?v=20261117075320';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
@@ -178,7 +178,7 @@ async function supabaseStore(cfg) {
     return data;
   };
   const PERFIL_COLS = 'id, nome, tipo, cor, ordem';
-  const CAT_COLS = 'id, perfil_id, nome, tipo, ordem, ativo, banco, estilo, titular';
+  const CAT_COLS = 'id, perfil_id, nome, tipo, ordem, ativo, banco, estilo, titular, subtipo, saldo_inicial, saldo_desde, limite, dia_fechamento, dia_vencimento';
   const CLASSE_COLS = 'id, perfil_id, nome, cor, ordem, ativo, escopo_padrao';
   const REGRA_COLS = 'id, perfil_id, texto, classe_id, escopo';
   const MES_COLS = 'perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao';
@@ -203,6 +203,8 @@ async function supabaseStore(cfg) {
   const limpaCat = (c) => comId({
     perfil_id: c.perfil_id, nome: c.nome, tipo: c.tipo, ordem: c.ordem ?? 0, ativo: c.ativo ?? true,
     banco: c.banco || null, estilo: c.estilo || null, titular: c.titular || null,
+    subtipo: c.subtipo || null, saldo_inicial: c.saldo_inicial ?? null, saldo_desde: c.saldo_desde || null,
+    limite: c.limite ?? null, dia_fechamento: c.dia_fechamento || null, dia_vencimento: c.dia_vencimento || null,
   }, c);
   const limpaClasse = (c) => comId({
     perfil_id: c.perfil_id, nome: c.nome, cor: c.cor || '#64748b', ordem: c.ordem ?? 0,

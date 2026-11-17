@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117010216';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117010216';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117010216';
-import { lerPlanilha } from './importer.js?v=20261117010216';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117010216';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117010216';
-import { ILUSTRA } from './ilustra.js?v=20261117010216';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117075320';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117075320';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117075320';
+import { lerPlanilha } from './importer.js?v=20261117075320';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117075320';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117075320';
+import { ILUSTRA } from './ilustra.js?v=20261117075320';
 
 const app = document.getElementById('app');
 const S = {
@@ -315,7 +315,7 @@ function rota() {
   if (h[0] === 'ajuda') return { view: 'ajuda' };
   if (h[0] === 'geral') return { view: 'geral' };
   const ano = Number(h[1]), mes = Number(h[2]);
-  if (h[0] === 'lancamentos' || h[0] === 'classificar' || h[0] === 'cartoes') {
+  if (h[0] === 'lancamentos' || h[0] === 'classificar' || h[0] === 'cartoes' || h[0] === 'contas') {
     if (ano && mes >= 1 && mes <= 12) return { view: h[0], ano, mes };
     return { view: h[0], ...mesPadrao() };
   }
@@ -409,7 +409,8 @@ function render() {
   const r = rota();
   app.innerHTML = shell(r);
   const main = app.querySelector('main');
-  if (r.view === 'mes') renderMes(main, r.ano, r.mes);
+  if (r.view === 'mes') (ehControle() ? renderResumo : renderMes)(main, r.ano, r.mes);
+  else if (r.view === 'contas') renderContas(main, r.ano, r.mes);
   else if (r.view === 'cartoes') renderCartoes(main, r.ano, r.mes);
   else if (r.view === 'lancamentos') renderLancamentos(main, r.ano, r.mes);
   else if (r.view === 'classificar') renderClassificar(main, r.ano, r.mes);
@@ -435,11 +436,12 @@ function shell(r) {
     <span>Finanças Marques<small>Modo ${MODOS[modo()].nome.toLowerCase()}</small></span></div>`;
   const menu = controle
     ? `<span class="nav-titulo">Mês a mês</span>
-        ${item(`#/mes${sufixoMes}`, 'mes', 'Visão do mês', ICON.mes)}
-        ${item(`#/cartoes${sufixoMes}`, 'cartoes', 'Cartões', ICON.cartao)}
+        ${item(`#/mes${sufixoMes}`, 'mes', 'Resumo', ICON.mes)}
+        ${item(`#/contas${sufixoMes}`, 'contas', 'Contas', ICON.banco)}
         ${item(`#/lancamentos${sufixoMes}`, 'lancamentos', 'Lançamentos', ICON.lista)}
         ${item(`#/classificar${sufixoMes}`, 'classificar', 'Classificar', ICON.classificar, pendentes ? `<b class="badge">${pendentes > 99 ? '99+' : pendentes}</b>` : '')}
-        ${item(`#/categorias${sufixoMes}`, 'categorias', 'Categorias', ICON.categorias)}
+        ${item(`#/cartoes${sufixoMes}`, 'cartoes', 'Cartões', ICON.cartao)}
+        ${item(`#/categorias${sufixoMes}`, 'categorias', 'Categorias', ICON.categorias, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Análise</span>
         ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano, '', 'so-desktop')}
         ${item('#/geral', 'geral', 'Todos os anos', ICON.geral, '', 'so-desktop')}
@@ -1373,6 +1375,287 @@ function abrirImportacao({ ano, mes }) {
   document.body.appendChild(dlg);
   dlg.addEventListener('cancel', (e) => { e.preventDefault(); fechar(); });
   passo1();
+  dlg.showModal();
+}
+
+/* ===================================================== contas e saldos */
+// Modo Controle: o saldo de cada conta vem do saldo inicial + entradas − saídas dos lançamentos
+// (inclusive transferências entre as próprias contas). Cartões de crédito não entram no "saldo nas contas".
+const SUBTIPOS = { corrente: 'Conta corrente', empresa: 'Conta empresa', investimento: 'Investimento', poupanca: 'Poupança', outra: 'Outra conta' };
+const contasBancarias = () => cats().filter((c) => c.tipo === 'debito' && c.ativo !== false);
+const cartoesCredito = () => cats().filter((c) => c.tipo === 'credito' && c.ativo !== false);
+const isoFim = (ano, mes) => `${ano}-${pad2(mes)}-${pad2(new Date(ano, mes, 0).getDate())}`;
+const comSinal = (l) => (sentidoDe(l) === 'entrada' ? l.valor : -l.valor);
+
+/** Saldo da conta no fim do dia `ate` (AAAA-MM-DD). O saldo inicial vale a partir de `saldo_desde`. */
+function saldoConta(cat, ate) {
+  const desde = cat.saldo_desde || '0000-00-00';
+  let s = Number(cat.saldo_inicial || 0);
+  for (const l of S.data.lancamentos) {
+    if (l.categoria_id === cat.id && l.data >= desde && l.data <= ate) s += comSinal(l);
+  }
+  return Math.round(s * 100) / 100;
+}
+
+/** Movimento de uma conta no mês: receitas, despesas, transferências e saldos. */
+function movimentoConta(cat, ano, mes) {
+  const pre = `${ano}-${pad2(mes)}`;
+  const r = { receitas: 0, despesas: 0, transfEntrada: 0, transfSaida: 0, qtd: 0 };
+  for (const l of S.data.lancamentos) {
+    if (l.categoria_id !== cat.id || !String(l.data).startsWith(pre)) continue;
+    r.qtd += 1;
+    if (l.destino === 'transferencia') {
+      if (sentidoDe(l) === 'entrada') r.transfEntrada += l.valor; else r.transfSaida += l.valor;
+    } else if (sentidoDe(l) === 'entrada') r.receitas += l.valor;
+    else r.despesas += l.valor;
+  }
+  const pa = anterior(ano, mes);
+  r.saldoInicio = saldoConta(cat, isoFim(pa.ano, pa.mes));
+  r.saldoFim = saldoConta(cat, isoFim(ano, mes));
+  return r;
+}
+
+/** Totais do mês a partir dos lançamentos (modo Controle). */
+function totaisControle(ano, mes) {
+  const pre = `${ano}-${pad2(mes)}`;
+  const doMes = S.data.lancamentos.filter((l) => String(l.data).startsWith(pre));
+  const receitas = doMes.filter((l) => l.destino === 'receita' || l.destino === 'rendimento').reduce((s, l) => s + l.valor, 0);
+  const despesas = doMes.filter((l) => l.destino === 'despesa').reduce((s, l) => s + l.valor, 0);
+  const saldo = contasBancarias().reduce((s, c) => s + saldoConta(c, isoFim(ano, mes)), 0);
+  return { receitas, despesas, balanco: receitas - despesas, saldo, doMes };
+}
+
+/** Bolinha colorida da conta (cor do cartão escolhida em Ajustes). */
+function avatarConta(cat) {
+  const e = ESTILOS[estiloDe(cat)];
+  return `<span class="avatar-conta" style="--cv-bg:${e.bg};--cv-tx:${e.tx}">${esc((cat.banco || cat.nome || '?').trim()[0].toUpperCase())}</span>`;
+}
+
+/** "↑ 12% vs mês anterior" em forma de etiqueta. */
+function chipVariacao(v, ref, menorMelhor = false) {
+  if (ref === null || ref === undefined || ref === 0 || v === null || v === undefined) return '<span class="chip-var neutro">— vs mês anterior</span>';
+  const p = (v - ref) / Math.abs(ref);
+  const bom = menorMelhor ? p <= 0 : p >= 0;
+  return `<span class="chip-var ${bom ? 'bom' : 'ruim'}">${p >= 0 ? '↗' : '↘'} ${Math.abs(Math.round(p * 100))}% vs mês anterior</span>`;
+}
+
+/* ============================================================== resumo */
+function renderResumo(main, ano, mes) {
+  const pa = anterior(ano, mes);
+  const t = totaisControle(ano, mes);
+  const tAnt = totaisControle(pa.ano, pa.mes);
+  const hoje = new Date();
+  const ehMesAtual = hoje.getFullYear() === ano && hoje.getMonth() + 1 === mes;
+  const contas = contasBancarias();
+  const cartoes = cartoesCredito();
+  const map = indexMeses(efetivos());
+  const l = linhaMes(ano, mes, map, cats());
+  const lAnt = linhaMes(pa.ano, pa.mes, map, cats());
+  const semSaldoInicial = contas.filter((c) => c.saldo_inicial === null || c.saldo_inicial === undefined);
+  const pend = semClasse(t.doMes).length;
+  const nConf = conferir(`${ano}-${pad2(mes)}`).length;
+
+  const itemLanc = (x) => {
+    const entrada = sentidoDe(x) === 'entrada';
+    const classe = classePorId(x.classe_id);
+    const conta = S.data.categorias.find((c) => c.id === x.categoria_id);
+    return `<button class="lanc" data-id="${x.id}">
+      <span class="lanc-icone" style="--cor:${classe?.cor || (entrada ? 'var(--pos)' : '#94a3b8')}">${entrada ? '↓' : '↑'}</span>
+      <span class="lanc-txt"><b>${esc(x.descricao)}</b><small>${esc(classe?.nome || DESTINOS[x.destino])} · ${esc(conta?.banco || conta?.nome || x.conta || '')}</small></span>
+      <span class="lanc-lado"><span class="lanc-valor ${entrada ? 'pos' : ''}">${entrada ? '+' : '−'} ${fmtBRL(x.valor)}</span><small>${fmtDia(x.data)}</small></span>
+    </button>`;
+  };
+  const despesas = t.doMes.filter((x) => x.destino === 'despesa').sort((a, b) => b.data.localeCompare(a.data));
+  const receitas = t.doMes.filter((x) => x.destino === 'receita' || x.destino === 'rendimento').sort((a, b) => b.data.localeCompare(a.data));
+
+  main.innerHTML = `
+    ${cabecalhoMes(ano, mes, '#/mes', `
+      <a class="btn" href="#/lancamentos/${ano}/${mes}">${ICON.lista}<span>Lançamentos</span></a>
+      <button class="btn primario" data-a="importar-mes">${ICON.upload}<span>Importar extrato</span></button>`)}
+
+    ${pend || nConf ? `<div class="faixa-aviso">${ICON.classificar}
+      <span>${[pend ? `${pend} ${pend === 1 ? 'gasto' : 'gastos'} sem categoria` : '', nConf ? `${nConf} ${nConf === 1 ? 'item' : 'itens'} para conferir` : ''].filter(Boolean).join(' · ')}</span>
+      <a class="btn" href="#/classificar/${ano}/${mes}">Resolver agora</a></div>` : ''}
+
+    <div class="resumo-topo">
+      <section class="card saldo-card">
+        ${tituloCard(ehMesAtual ? 'Saldo atual' : `Saldo no fim de ${MESES[mes - 1].toLowerCase()}`, 'Soma do dinheiro nas suas contas.', 'carteira')}
+        <div class="saldo-pilha">
+          <div class="sp-linha entrada"><span class="sp-icone">↓</span><span>Receitas do mês</span><b>${fmtBRL(t.receitas)}</b></div>
+          <div class="sp-saldo"><strong class="${cls(t.saldo)}">${grande(t.saldo)}</strong></div>
+          <div class="sp-linha saida"><span class="sp-icone">↑</span><span>Despesas do mês</span><b>${fmtBRL(t.despesas)}</b></div>
+        </div>
+        ${semSaldoInicial.length && contas.length ? `<p class="hint aviso-txt">Falta o saldo inicial de ${semSaldoInicial.length === 1 ? 'uma conta' : `${semSaldoInicial.length} contas`}. <a href="#/contas/${ano}/${mes}">Definir →</a></p>` : ''}
+      </section>
+
+      <section class="visao-geral">
+        <h2 class="secao">Visão geral</h2>
+        <div class="vg-grade">
+          <div class="card vg"><span class="vg-icone azul">${ICON.banco}</span><div><strong>${fmtBRL(t.saldo)}</strong><span>Saldo nas contas</span>${chipVariacao(t.saldo, tAnt.saldo)}</div></div>
+          <div class="card vg"><span class="vg-icone verde">+</span><div><strong class="pos">${fmtBRL(t.receitas)}</strong><span>Total recebido</span>${chipVariacao(t.receitas, tAnt.receitas)}</div></div>
+          <div class="card vg"><span class="vg-icone vermelho">−</span><div><strong class="neg">${fmtBRL(t.despesas)}</strong><span>Total gasto</span>${chipVariacao(t.despesas, tAnt.despesas, true)}</div></div>
+          <div class="card vg"><span class="vg-icone amarelo">⇅</span><div><strong class="${cls(t.balanco)}">${fmtBRL(t.balanco)}</strong><span>Balanço (recebido − gasto)</span>${chipVariacao(t.balanco, tAnt.balanco)}</div></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="resumo-grid">
+      <div class="coluna">
+        <section class="card">
+          ${tituloCard('Resumo por conta', 'O que entrou e saiu de cada conta neste mês.', 'cofre')}
+          ${contas.length ? `<div class="tabela-wrap"><table class="tabela tabela-leve">
+            <thead><tr><th>Conta</th><th>Receitas</th><th>Despesas</th><th>Saldo</th></tr></thead>
+            <tbody>${contas.map((c) => { const m = movimentoConta(c, ano, mes); return `<tr class="clicavel" data-ir="#/contas/${ano}/${mes}">
+              <th><span class="conta-nome">${avatarConta(c)}<span>${esc(c.nome)}<small>${esc(SUBTIPOS[c.subtipo] || 'Conta')}</small></span></span></th>
+              <td class="pos">${fmtBRL(m.receitas)}</td><td>${fmtBRL(m.despesas)}</td>
+              <td><b class="${cls(m.saldoFim)}">${fmtBRL(m.saldoFim)}</b>${m.transfEntrada || m.transfSaida
+                ? `<small class="transf-info" title="Transferências entre as suas contas">⇄ +${fmtNum(m.transfEntrada)} / −${fmtNum(m.transfSaida)}</small>` : ''}</td></tr>`; }).join('')}</tbody>
+            <tfoot><tr><th>Total</th><td>${fmtBRL(contas.reduce((s, c) => s + movimentoConta(c, ano, mes).receitas, 0))}</td>
+              <td>${fmtBRL(contas.reduce((s, c) => s + movimentoConta(c, ano, mes).despesas, 0))}</td><td>${fmtBRL(t.saldo)}</td></tr></tfoot>
+          </table></div>` : '<p class="sub">Nenhuma conta cadastrada. <a href="#/ajustes">Cadastrar contas →</a></p>'}
+        </section>
+
+        <section class="card">
+          ${tituloCard('Cartões de crédito', 'Fatura de cada cartão neste mês.', 'cartoes')}
+          ${cartoes.length ? `<div class="tabela-wrap"><table class="tabela tabela-leve">
+            <thead><tr><th>Cartão</th><th>Fechamento</th><th>Vencimento</th><th>Fatura</th><th>Limite disponível</th></tr></thead>
+            <tbody>${cartoes.map((c) => {
+              const fat = l.desp[c.id];
+              const dia = (d) => (d ? `${pad2(d)}/${pad2(mes)}` : '—');
+              return `<tr class="clicavel" data-ir="#/cartoes/${ano}/${mes}" data-cartao-ir="${c.id}">
+                <th><span class="conta-nome">${avatarConta(c)}<span>${esc(c.banco || c.nome)}<small>${esc(c.banco ? c.nome : '')}${c.titular ? ` · ${esc(c.titular)}` : ''}</small></span></span></th>
+                <td>${dia(c.dia_fechamento)}</td><td>${dia(c.dia_vencimento)}</td>
+                <td><b>${fmtBRL(fat ?? 0)}</b>${delta(fat, lAnt.desp[c.id], 'vs mês ant.', true)}</td>
+                <td>${c.limite ? fmtBRL(Number(c.limite) - (fat ?? 0)) : '—'}</td></tr>`;
+            }).join('')}</tbody>
+            <tfoot><tr><th>Total</th><td></td><td></td><td>${fmtBRL(cartoes.reduce((s, c) => s + (l.desp[c.id] ?? 0), 0))}</td><td></td></tr></tfoot>
+          </table></div>` : '<p class="sub">Nenhum cartão cadastrado.</p>'}
+        </section>
+      </div>
+
+      <div class="coluna">
+        <section class="card">
+          ${tituloCard('Despesas do mês', `${despesas.length} ${despesas.length === 1 ? 'despesa' : 'despesas'} · ${fmtBRL(t.despesas)}`)}
+          ${despesas.length ? despesas.slice(0, 6).map(itemLanc).join('') : '<p class="sub">Nenhuma despesa lançada.</p>'}
+          ${despesas.length ? `<a class="ver-todas" href="#/lancamentos/${ano}/${mes}" data-filtro="d:despesa">Ver todas as despesas →</a>` : ''}
+        </section>
+        <section class="card">
+          ${tituloCard('Receitas do mês', `${receitas.length} ${receitas.length === 1 ? 'receita' : 'receitas'} · ${fmtBRL(t.receitas)}`)}
+          ${receitas.length ? receitas.slice(0, 6).map(itemLanc).join('') : '<p class="sub">Nenhuma receita lançada.</p>'}
+          ${receitas.length ? `<a class="ver-todas" href="#/lancamentos/${ano}/${mes}" data-filtro="d:receita">Ver todas as receitas →</a>` : ''}
+        </section>
+      </div>
+    </div>`;
+
+  main.querySelectorAll('[data-filtro]').forEach((a) => a.addEventListener('click', () => {
+    S.filtroLanc = { escopo: 'todos', cat: a.dataset.filtro, busca: '' };
+  }));
+  main.querySelectorAll('tr[data-ir]').forEach((tr) => tr.addEventListener('click', () => {
+    if (tr.dataset.cartaoIr) S.cartaoSel = tr.dataset.cartaoIr;
+    location.hash = tr.dataset.ir;
+  }));
+  main.querySelectorAll('.lanc[data-id]').forEach((b) => b.addEventListener('click', () => {
+    abrirLancamento(S.data.lancamentos.find((x) => x.id === b.dataset.id), { ano, mes });
+  }));
+}
+
+/* =============================================================== contas */
+function renderContas(main, ano, mes) {
+  const contas = contasBancarias();
+  const movs = contas.map((c) => ({ c, m: movimentoConta(c, ano, mes) }));
+  const soma = (k) => movs.reduce((s, x) => s + x.m[k], 0);
+  const pa = anterior(ano, mes);
+  const totalAnt = contas.reduce((s, c) => s + saldoConta(c, isoFim(pa.ano, pa.mes)), 0);
+
+  main.innerHTML = `
+    ${cabecalhoMes(ano, mes, '#/contas', `<a class="btn" href="#/ajustes">${ICON.mais}<span>Nova conta</span></a>`)}
+
+    <section class="card resumo-cartoes">
+      ${tituloCard('Dinheiro nas contas', `Saldo no fim de ${MESES[mes - 1].toLowerCase()}, somando todas as contas (cartões de crédito não entram).`, 'cofre')}
+      <div class="resumo-cartoes-nums">
+        <div><span>Saldo total</span><strong class="${cls(soma('saldoFim'))}">${grande(soma('saldoFim'))}</strong>${chipVariacao(soma('saldoFim'), totalAnt)}</div>
+        <div><span>Entrou no mês</span><strong class="pos">${grande(soma('receitas'))}</strong></div>
+        <div><span>Saiu no mês</span><strong>${grande(soma('despesas'))}</strong></div>
+      </div>
+    </section>
+
+    ${!contas.length ? `<section class="card vazio"><h2>Nenhuma conta cadastrada</h2><p>Cadastre a conta corrente, a conta da empresa, a de investimento…</p>
+      <div class="acoes"><a class="btn primario" href="#/ajustes">Cadastrar contas</a></div></section>` : `
+    <section class="card">
+      ${tituloCard('Contas', 'Toque numa conta para ajustar o tipo e o saldo inicial.')}
+      <div class="tabela-wrap"><table class="tabela tabela-leve">
+        <thead><tr><th>Conta</th><th>Saldo no início</th><th>Receitas</th><th>Despesas</th><th>Transf. recebidas</th><th>Transf. enviadas</th><th>Saldo no fim</th></tr></thead>
+        <tbody>${movs.map(({ c, m }) => `<tr class="clicavel" data-conta="${c.id}" tabindex="0">
+          <th><span class="conta-nome">${avatarConta(c)}<span>${esc(c.nome)}<small>${esc(SUBTIPOS[c.subtipo] || 'Conta')}${c.saldo_inicial === null || c.saldo_inicial === undefined ? ' · <span class="aviso-txt">sem saldo inicial</span>' : ''}</small></span></span></th>
+          <td>${fmtBRL(m.saldoInicio)}</td>
+          <td class="pos">${fmtBRL(m.receitas)}</td><td>${fmtBRL(m.despesas)}</td>
+          <td>${fmtBRL(m.transfEntrada)}</td><td>${fmtBRL(m.transfSaida)}</td>
+          <td><b class="${cls(m.saldoFim)}">${fmtBRL(m.saldoFim)}</b></td></tr>`).join('')}</tbody>
+        <tfoot><tr><th>Total</th><td>${fmtBRL(soma('saldoInicio'))}</td><td>${fmtBRL(soma('receitas'))}</td><td>${fmtBRL(soma('despesas'))}</td>
+          <td>${fmtBRL(soma('transfEntrada'))}</td><td>${fmtBRL(soma('transfSaida'))}</td><td>${fmtBRL(soma('saldoFim'))}</td></tr></tfoot>
+      </table></div>
+      <p class="hint">Transferências entre as suas contas tiram de uma e colocam na outra, sem contar como receita nem despesa.</p>
+    </section>`}`;
+
+  main.querySelectorAll('tr[data-conta]').forEach((tr) => {
+    const abrir = () => abrirConta(S.data.categorias.find((c) => c.id === tr.dataset.conta));
+    tr.addEventListener('click', abrir);
+    tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') abrir(); });
+  });
+}
+
+/** Ajustar uma conta: tipo e saldo inicial (contas) ou limite e datas da fatura (cartões). */
+function abrirConta(cat) {
+  const credito = cat.tipo === 'credito';
+  const primeiroLanc = S.data.lancamentos.filter((l) => l.categoria_id === cat.id).map((l) => l.data).sort()[0];
+  const dlg = document.createElement('dialog');
+  dlg.className = 'editor';
+  dlg.innerHTML = `
+    <form>
+      <header><h2>${esc(cat.banco || cat.nome)}</h2></header>
+      <div class="corpo">
+        <label class="campo"><span>Nome</span><input name="nome" value="${esc(cat.nome)}" required maxlength="60"></label>
+        ${credito ? `
+          <label class="campo"><span>Limite do cartão</span><input name="limite" inputmode="decimal" placeholder="0,00" value="${cat.limite ? fmtNum(Number(cat.limite)) : ''}"></label>
+          <div class="campos-2">
+            <label class="campo"><span>Dia do fechamento</span><input name="dia_fechamento" type="number" min="1" max="31" value="${cat.dia_fechamento || ''}"></label>
+            <label class="campo"><span>Dia do vencimento</span><input name="dia_vencimento" type="number" min="1" max="31" value="${cat.dia_vencimento || ''}"></label>
+          </div>` : `
+          <label class="campo"><span>Tipo de conta</span><select name="subtipo">
+            ${Object.entries(SUBTIPOS).map(([k, v]) => `<option value="${k}" ${(cat.subtipo || 'corrente') === k ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+          <div class="campos-2">
+            <label class="campo"><span>Saldo inicial</span><input name="saldo_inicial" inputmode="decimal" placeholder="0,00" value="${cat.saldo_inicial !== null && cat.saldo_inicial !== undefined ? fmtNum(Number(cat.saldo_inicial)) : ''}"></label>
+            <label class="campo"><span>Na data</span><input name="saldo_desde" type="date" value="${cat.saldo_desde || primeiroLanc || isoHoje()}"></label>
+          </div>
+          <p class="hint">Quanto havia nesta conta no começo do dia escolhido. A partir daí o site soma as entradas e tira as saídas sozinho.</p>`}
+      </div>
+      <footer><span></span><div class="direita">
+        <button type="button" class="btn" data-a="cancelar">Cancelar</button>
+        <button type="submit" class="btn primario">Salvar</button>
+      </div></footer>
+    </form>`;
+  document.body.appendChild(dlg);
+  const form = dlg.querySelector('form');
+  const fechar = () => { dlg.close(); dlg.remove(); };
+  form.querySelector('[data-a="cancelar"]').addEventListener('click', fechar);
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); fechar(); });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      const num = (n) => (form[n]?.value.trim() ? parseExpr(form[n].value).value : null);
+      const mud = { nome: form.nome.value.trim() || cat.nome };
+      if (credito) {
+        Object.assign(mud, { limite: num('limite'), dia_fechamento: Number(form.dia_fechamento.value) || null, dia_vencimento: Number(form.dia_vencimento.value) || null });
+      } else {
+        Object.assign(mud, { subtipo: form.subtipo.value, saldo_inicial: num('saldo_inicial'), saldo_desde: form.saldo_desde.value || null });
+      }
+      const salvo = await S.store.saveCategoria({ ...cat, ...mud });
+      Object.assign(cat, salvo);
+      toast('Conta atualizada.');
+      fechar();
+      render();
+    } catch (ex) { toast(ex.message, 'erro'); }
+  });
   dlg.showModal();
 }
 
@@ -3057,6 +3340,7 @@ const ICON = {
   ano: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>'),
   ajustes: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   mais: svg('<path d="M12 5v14M5 12h14"/>'),
+  banco: svg('<path d="M3 10h18L12 4 3 10z"/><path d="M5 10v8M9.5 10v8M14.5 10v8M19 10v8M3 20h18"/>'),
   cartao: svg('<rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20M6 15h4"/>'),
   editar: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   classificar: svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>'),

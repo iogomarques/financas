@@ -262,3 +262,13 @@ alter table public.fin_preferencias add column if not exists modo text check (mo
 alter table public.fin_categorias add column if not exists banco   text check (char_length(banco) <= 40);
 alter table public.fin_categorias add column if not exists estilo  text check (char_length(estilo) <= 20);
 alter table public.fin_categorias add column if not exists titular text check (char_length(titular) <= 40);
+
+-- Contas com saldo e cartões com limite/datas (aplicado em 17/11/2026)
+-- Saldo da conta = saldo_inicial (no início do dia saldo_desde) + entradas − saídas dos lançamentos daquela conta.
+alter table public.fin_categorias add column if not exists subtipo text
+  check (subtipo in ('corrente', 'empresa', 'investimento', 'poupanca', 'outra'));
+alter table public.fin_categorias add column if not exists saldo_inicial numeric(14, 2);
+alter table public.fin_categorias add column if not exists saldo_desde date;
+alter table public.fin_categorias add column if not exists limite numeric(14, 2) check (limite is null or limite >= 0);
+alter table public.fin_categorias add column if not exists dia_fechamento int check (dia_fechamento between 1 and 31);
+alter table public.fin_categorias add column if not exists dia_vencimento int check (dia_vencimento between 1 and 31);
