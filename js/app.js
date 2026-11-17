@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117084047';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117084047';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117084047';
-import { lerPlanilha } from './importer.js?v=20261117084047';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117084047';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117084047';
-import { ILUSTRA } from './ilustra.js?v=20261117084047';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117180020';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117180020';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117180020';
+import { lerPlanilha } from './importer.js?v=20261117180020';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117180020';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117180020';
+import { ILUSTRA } from './ilustra.js?v=20261117180020';
 
 const app = document.getElementById('app');
 const S = {
@@ -372,10 +372,11 @@ function rota() {
     if (ano && mes >= 1 && mes <= 12) return { view: h[0], ano, mes, aba };
     return { view: h[0], ...mesPadrao(), aba };
   }
+  // A antiga tela Categorias agora fica dentro de Gráficos
   if (h[0] === 'categorias') {
-    if (ano && !h[2]) return { view: 'categorias', ano, mes: null };
-    if (ano && mes >= 1 && mes <= 12) return { view: 'categorias', ano, mes };
-    return { view: 'categorias', ...mesPadrao() };
+    if (ano && !h[2]) { S.grafPer = 'ano'; return { view: 'graficos', ano, mes: 12 }; }
+    if (ano && mes >= 1 && mes <= 12) return { view: 'graficos', ano, mes };
+    return { view: 'graficos', ...mesPadrao() };
   }
   if (h[0] === 'mes' && ano && mes >= 1 && mes <= 12) return { view: 'mes', ano, mes };
   return { view: 'mes', ...mesPadrao() };
@@ -469,7 +470,6 @@ function render() {
   else if (r.view === 'calendario') renderCalendario(main, r.ano, r.mes);
   else if (r.view === 'graficos') renderGraficos(main, r.ano, r.mes);
   else if (r.view === 'classificar') renderClassificar(main, r.ano, r.mes);
-  else if (r.view === 'categorias') renderCategorias(main, r.ano, r.mes);
   else if (r.view === 'geral') renderGeral(main);
   else if (r.view === 'ano') renderAno(main, r.ano, r.aba);
   else if (r.view === 'ajuda') renderAjuda(main);
@@ -497,7 +497,6 @@ function shell(r) {
         ${item(`#/classificar${sufixoMes}`, 'classificar', 'Classificar', ICON.classificar, pendentes ? `<b class="badge">${pendentes > 99 ? '99+' : pendentes}</b>` : '')}
         ${item(`#/cartoes${sufixoMes}`, 'cartoes', 'Cartões', ICON.cartao)}
         ${item(`#/calendario${sufixoMes}`, 'calendario', 'Calendário', ICON.calendario)}
-        ${item(`#/categorias${sufixoMes}`, 'categorias', 'Categorias', ICON.categorias, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Análise</span>
         ${item(`#/graficos${sufixoMes}`, 'graficos', 'Gráficos', ICON.grafico, '', 'so-desktop')}
         ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano, '', 'so-desktop')}
@@ -848,7 +847,7 @@ function renderMes(main, ano, mes) {
             <div class="nome">${esc(c?.nome || '')}</div><div class="val"><strong>${fmtBRL(v)}</strong><span class="delta">${Math.round((v / tot) * 100)}%</span></div></div>`; }).join('')}
           ${pend ? `<p class="hint aviso-txt">${pend} ${pend === 1 ? 'gasto' : 'gastos'} sem categoria. <a href="#/classificar/${ano}/${mes}">Classificar agora →</a></p>` : ''}
           ${(() => { const n = conferir(`${ano}-${pad2(mes)}`).length; return n ? `<p class="hint aviso-txt">${n} ${n === 1 ? 'item' : 'itens'} para conferir (transferências, fatura, repetidos). <a href="#/classificar/${ano}/${mes}">Conferir →</a></p>` : ''; })()}
-          <div class="linha-total"><a href="#/categorias/${ano}/${mes}">Ver todas as categorias →</a></div>
+          <div class="linha-total"><a href="#/graficos/${ano}/${mes}">Ver todas as categorias →</a></div>
         </section>`;
       })()}
 
@@ -2251,6 +2250,94 @@ function fatiasPorCategoria(lancs) {
   return [...lista.slice(0, 7), { nome: `Outras (${resto.length})`, cor: '#94a3b8', v: resto.reduce((s, x) => s + x.v, 0) }];
 }
 
+/** Lista "Por categoria" dos Gráficos: cada categoria abre as subcategorias e as transações. */
+function blocoPorCategoria(lancPer, periodo, per) {
+  const tipo = S.grafTipo === 'receita' ? 'receita' : 'despesa';
+  const esc0 = S.grafEscopo || 'todos';
+  const ehDoTipo = (l) => (tipo === 'receita' ? l.destino === 'receita' || l.destino === 'rendimento' : l.destino === 'despesa');
+  const lista = lancPer.filter(ehDoTipo).filter((l) => esc0 === 'todos' || l.escopo === esc0);
+  const total = lista.reduce((s, l) => s + l.valor, 0);
+  const palavra = (n) => (tipo === 'receita' ? (n === 1 ? 'receita' : 'receitas') : (n === 1 ? 'gasto' : 'gastos'));
+  const grupos = new Map();
+  for (const l of lista) {
+    const k = raizClasse(classePorId(l.classe_id))?.id || '';
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(l);
+  }
+  const linhas = [...grupos.entries()].map(([id, ls]) => {
+    const c = classePorId(id);
+    const subs = new Map();
+    for (const l of ls) {
+      const sc = classePorId(l.classe_id);
+      const sk = sc && sc.pai_id ? sc.id : '';
+      subs.set(sk, (subs.get(sk) || 0) + l.valor);
+    }
+    const subLista = [...subs.entries()].filter(() => subs.size > 1 || !subs.has(''))
+      .map(([sid, v]) => ({ sub: !!sid, nome: sid ? classePorId(sid).nome : `${c?.nome || ''} (geral)`, cor: sid ? classePorId(sid).cor : c?.cor, v }))
+      .sort((a, b) => b.v - a.v);
+    return { id, nome: c?.nome || 'Sem categoria', cor: c?.cor || '#cbd5e1', ls, subLista, total: ls.reduce((s, l) => s + l.valor, 0) };
+  }).sort((a, b) => (a.id === '') - (b.id === '') || b.total - a.total);
+  const maior = Math.max(1, ...linhas.map((x) => x.total));
+  const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
+  const semCat = lista.filter((l) => !l.classe_id).length;
+  const temClasses = S.data.classes.some((c) => tipoDaClasse(c) === tipo);
+  const ultimo = periodo[periodo.length - 1];
+
+  const tabela = per !== 'mes' && linhas.length ? `
+    <details class="ver-numeros"><summary>Ver mês a mês</summary>
+      <div class="tabela-wrap"><table class="tabela">
+        <thead><tr><th>Categoria</th>${periodo.map((p) => `<th>${rotuloMesCurto(p)}</th>`).join('')}<th>Total</th></tr></thead>
+        <tbody>${linhas.map((x) => `<tr><th><span class="dot" style="background:${x.cor}"></span> ${esc(x.nome)}</th>
+          ${periodo.map((p) => { const v = x.ls.filter((l) => l.data.startsWith(`${p.ano}-${pad2(p.mes)}`)).reduce((s, l) => s + l.valor, 0); return `<td>${v ? fmtNum(v) : ''}</td>`; }).join('')}
+          <td><b>${fmtNum(x.total)}</b></td></tr>`).join('')}</tbody>
+      </table></div>
+    </details>` : '';
+
+  return `<section class="card por-categoria">
+    <div class="card-cab"><div><h2>Por categoria</h2><p class="sub">Toque numa categoria para ver as subcategorias e cada transação.</p></div></div>
+    <div class="filtros-lanc">
+      <div class="seg" role="group" aria-label="Gastos ou receitas">${Object.entries(TIPOS_CLASSE).map(([k, t]) =>
+        `<button data-graf-tipo="${k}" class="${tipo === k ? 'ativo' : ''}" aria-pressed="${tipo === k}">${t}</button>`).join('')}</div>
+      <div class="seg" role="group" aria-label="Pessoal ou empresa">${[['todos', 'Tudo'], ['pessoal', 'Pessoal'], ['empresa', 'Empresa']].map(([v, t]) =>
+        `<button data-graf-escopo="${v}" class="${esc0 === v ? 'ativo' : ''}" aria-pressed="${esc0 === v}">${t}</button>`).join('')}</div>
+      <span class="sub">Total <b>${fmtBRL(total)}</b>${semCat ? ` · <a href="#/classificar/${ultimo.ano}/${ultimo.mes}" data-ir-classificar="${tipo}">${semCat} sem categoria — classificar</a>` : ''}</span>
+    </div>
+    ${!temClasses ? cardSemClasses(tipo) : ''}
+    ${!linhas.length ? `<p class="sub">Nenhum${tipo === 'receita' ? 'a receita' : ' gasto'} no período.</p>` : linhas.map((x) => `
+      <details class="cat-item">
+        <summary>
+          <span class="dot" style="background:${x.cor}"></span>
+          <span class="cat-nome">${esc(x.nome)}<small>${x.ls.length} ${palavra(x.ls.length)}${(() => { const n = x.subLista.filter((s) => s.sub).length; return n ? ` · ${n} ${n === 1 ? 'subcategoria' : 'subcategorias'}` : ''; })()}</small></span>
+          <span class="cat-barra"><i style="width:${(x.total / maior) * 100}%;background:${x.cor}"></i></span>
+          <span class="cat-valor"><b>${fmtBRL(x.total)}</b><small>${total ? Math.round((x.total / total) * 100) : 0}%</small></span>
+        </summary>
+        ${x.subLista.length ? `<div class="subcats">${x.subLista.map((s) => `<div class="subcat"><span class="dot" style="background:${s.cor}"></span><span>${esc(s.nome)}</span>
+          <span class="cat-barra"><i style="width:${(s.v / x.total) * 100}%;background:${s.cor}"></i></span><b>${fmtBRL(s.v)}</b></div>`).join('')}</div>` : ''}
+        <div class="cat-lista">
+          ${[...x.ls].sort((a, b) => b.data.localeCompare(a.data)).map((l) => `
+            <button class="lanc" data-lanc="${l.id}">
+              <span class="lanc-txt"><b>${esc(l.descricao)}</b>
+                <small>${fmtDia(l.data)} · ${classePorId(l.classe_id)?.pai_id ? esc(classePorId(l.classe_id).nome) + ' · ' : ''}${esc(l.conta || catPorId.get(l.categoria_id)?.nome || '')} · <span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo] || 'Pessoal'}</span></small></span>
+              <span class="lanc-valor">${fmtBRL(l.valor)}</span>
+            </button>`).join('')}
+        </div>
+      </details>`).join('')}
+    ${tabela}
+  </section>`;
+}
+
+function bindPorCategoria(main) {
+  bindSemClasses(main);
+  main.querySelectorAll('[data-graf-tipo]').forEach((b) => b.addEventListener('click', () => { S.grafTipo = b.dataset.grafTipo; render(); }));
+  main.querySelectorAll('[data-graf-escopo]').forEach((b) => b.addEventListener('click', () => { S.grafEscopo = b.dataset.grafEscopo; render(); }));
+  main.querySelector('[data-ir-classificar]')?.addEventListener('click', (e) => { S.classTipo = e.currentTarget.dataset.irClassificar; });
+  main.querySelectorAll('.por-categoria [data-lanc]').forEach((b) => b.addEventListener('click', () => {
+    const l = S.data.lancamentos.find((x) => x.id === b.dataset.lanc);
+    const [a, m] = l.data.split('-').map(Number);
+    abrirLancamento(l, { ano: a, mes: m });
+  }));
+}
+
 function renderGraficos(main, ano, mes) {
   const per = PERIODOS_GRAF[S.grafPer] ? S.grafPer : '12m';
   const controle = ehControle();
@@ -2318,6 +2405,8 @@ function renderGraficos(main, ano, mes) {
       ${blocoRosca('g-rec', 'Receitas por categoria', `De onde veio o dinheiro · ${esc(nomePer)}`, fatiasR, 'Nenhuma receita no período.')}
     </div>` : ''}
 
+    ${controle ? blocoPorCategoria(lancPer, periodo, per) : ''}
+
     <div class="graf-duplo">
       ${temPesEmp ? `<section class="card grafico">
         ${tituloCard('Pessoal e empresa', 'Despesas de cada mês, separadas pelo lado.')}
@@ -2340,6 +2429,7 @@ function renderGraficos(main, ano, mes) {
     </section>` : ''}`;
 
   main.querySelectorAll('[data-per]').forEach((b) => b.addEventListener('click', () => { S.grafPer = b.dataset.per; render(); }));
+  if (controle) bindPorCategoria(main);
   if (!window.Chart) return;
 
   // Estilo comum: grade discreta, um só eixo, valores em reais no tooltip
@@ -2478,7 +2568,7 @@ function renderClassificar(main, ano, mes) {
     ${cabecalhoMes(ano, mes, '#/classificar', `
       <div class="seg" role="group" aria-label="Gastos ou receitas">${Object.entries(TIPOS_CLASSE).map(([k, t]) => `<button data-tipo-classe="${k}" class="${tipo === k ? 'ativo' : ''}" aria-pressed="${tipo === k}">${t}</button>`).join('')}</div>
       <button class="btn" data-a="aplicar-regras" title="Usa as regras salvas nos lançamentos ainda sem categoria">Aplicar regras</button>
-      <a class="btn" href="#/categorias/${ano}/${mes}">Ver categorias</a>`)}
+      <a class="btn" href="#/graficos/${ano}/${mes}">${ICON.grafico}<span>Ver gráficos</span></a>`)}
 
     ${!cl.length ? cardSemClasses(tipo) : ''}
 
@@ -2505,7 +2595,7 @@ function renderClassificar(main, ano, mes) {
       <section class="card vazio pronto">
         <h2>Tudo classificado ✓</h2>
         <p>${tipo === 'receita' ? 'Todas as receitas' : 'Todos os gastos'} de ${MESES[mes - 1].toLowerCase()} têm categoria.</p>
-        <div class="acoes"><a class="btn primario" href="#/categorias/${ano}/${mes}">Ver quanto foi para cada categoria</a></div>
+        <div class="acoes"><a class="btn primario" href="#/graficos/${ano}/${mes}">Ver quanto foi para cada categoria</a></div>
       </section>`
     : `<div class="grupos">${grupos.map((g, gi) => `
       <section class="card grupo" data-g="${gi}">
@@ -2569,154 +2659,6 @@ function renderClassificar(main, ano, mes) {
 }
 
 /* ========================================================== categorias */
-function renderCategorias(main, ano, mes) {
-  const porAno = !mes;
-  const fc = S.filtroCat || (S.filtroCat = { escopo: 'todos', conta: '', tipo: 'despesa' });
-  const tipo = fc.tipo === 'receita' ? 'receita' : 'despesa';
-  const ehDoTipo = (l) => (tipo === 'receita' ? l.destino === 'receita' || l.destino === 'rendimento' : l.destino === 'despesa');
-  const palavra = (n) => (tipo === 'receita' ? (n === 1 ? 'receita' : 'receitas') : (n === 1 ? 'gasto' : 'gastos'));
-  const prefixo = porAno ? `${ano}-` : `${ano}-${pad2(mes)}`;
-  const doPeriodo = S.data.lancamentos.filter((l) => ehDoTipo(l) && String(l.data).startsWith(prefixo));
-  const despesas = doPeriodo
-    .filter((l) => fc.escopo === 'todos' || l.escopo === fc.escopo)
-    .filter((l) => !fc.conta || l.categoria_id === fc.conta);
-  const total = despesas.reduce((s, l) => s + l.valor, 0);
-  const soma = (f) => doPeriodo.filter((l) => !fc.conta || l.categoria_id === fc.conta).filter(f).reduce((s, l) => s + l.valor, 0);
-  const pessoal = soma((l) => l.escopo === 'pessoal');
-  const empresa = soma((l) => l.escopo === 'empresa');
-  const semCat = despesas.filter((l) => !l.classe_id);
-
-  // Agrupa pela categoria PRINCIPAL; as subcategorias aparecem dentro dela
-  const grupos = new Map();
-  for (const l of despesas) {
-    const k = raizClasse(classePorId(l.classe_id))?.id || '';
-    if (!grupos.has(k)) grupos.set(k, []);
-    grupos.get(k).push(l);
-  }
-  const linhas = [...grupos.entries()].map(([id, ls]) => {
-    const c = classePorId(id);
-    // subtotais por subcategoria (o que foi direto na principal fica como "geral")
-    const subs = new Map();
-    for (const l of ls) {
-      const sc = classePorId(l.classe_id);
-      const sk = sc && sc.pai_id ? sc.id : '';
-      subs.set(sk, (subs.get(sk) || 0) + l.valor);
-    }
-    const subLista = [...subs.entries()].filter(() => subs.size > 1 || !subs.has(''))
-      .map(([sid, v]) => ({ nome: sid ? classePorId(sid).nome : `${c?.nome || ''} (geral)`, cor: sid ? classePorId(sid).cor : c?.cor, v }))
-      .sort((a, b) => b.v - a.v);
-    return { id, nome: c?.nome || 'Sem categoria', cor: c?.cor || '#cbd5e1', ls, subLista, total: ls.reduce((s, l) => s + l.valor, 0) };
-  }).sort((a, b) => (a.id === '') - (b.id === '') || b.total - a.total);
-  const maior = Math.max(1, ...linhas.map((x) => x.total));
-  const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
-  const temClasses = S.data.classes.some((c) => tipoDaClasse(c) === tipo);
-
-  const seletorTipo = `<div class="seg" role="group" aria-label="Gastos ou receitas">${Object.entries(TIPOS_CLASSE).map(([k, t]) =>
-    `<button data-tipo-cat="${k}" class="${tipo === k ? 'ativo' : ''}" aria-pressed="${tipo === k}">${t}</button>`).join('')}</div>`;
-  const cab = porAno
-    ? `<div class="barra-pagina">
-        <div class="barra-esq">
-          <a class="btn icone discreto" href="#/categorias/${ano - 1}" aria-label="Ano anterior">‹</a>
-          <a class="btn icone discreto" href="#/categorias/${ano + 1}" aria-label="Próximo ano">›</a>
-          <span class="titulo-mes">${ano}</span>
-        </div>
-        <div class="barra-dir">${seletorTipo}<div class="abas"><a href="#/categorias/${ano}/${new Date().getMonth() + 1}">Mês</a><a class="ativo" href="#/categorias/${ano}">Ano inteiro</a></div></div>
-      </div>`
-    : cabecalhoMes(ano, mes, '#/categorias', `${seletorTipo}<div class="abas"><a class="ativo" href="#/categorias/${ano}/${mes}">Mês</a><a href="#/categorias/${ano}">Ano inteiro</a></div>`);
-
-  // Tabela categoria × mês (só no ano)
-  const tabelaAno = porAno && linhas.length ? `
-    <section class="card largo">
-      <h2>Mês a mês</h2>
-      <div class="tabela-wrap"><table class="tabela">
-        <thead><tr><th>Categoria</th>${MESES_CURTO.map((m) => `<th>${m}</th>`).join('')}<th>Total</th></tr></thead>
-        <tbody>${linhas.map((x) => `<tr><th><span class="dot" style="background:${x.cor}"></span> ${esc(x.nome)}</th>
-          ${MESES_CURTO.map((_, i) => { const v = x.ls.filter((l) => Number(l.data.slice(5, 7)) === i + 1).reduce((s, l) => s + l.valor, 0); return `<td>${v ? fmtNum(v) : ''}</td>`; }).join('')}
-          <td><b>${fmtNum(x.total)}</b></td></tr>`).join('')}</tbody>
-        <tfoot><tr><th>Total</th>${MESES_CURTO.map((_, i) => { const v = despesas.filter((l) => Number(l.data.slice(5, 7)) === i + 1).reduce((s, l) => s + l.valor, 0); return `<td>${v ? fmtNum(v) : ''}</td>`; }).join('')}<td>${fmtNum(total)}</td></tr></tfoot>
-      </table></div>
-    </section>` : '';
-
-  main.innerHTML = `
-    ${cab}
-
-    <section class="mini-kpis">
-      <div class="card"><span>${tipo === 'receita' ? 'Receitas' : 'Gastos'} ${fc.escopo !== 'todos' ? `(${LADO[fc.escopo].toLowerCase()})` : ''}</span><strong class="${tipo === 'receita' ? 'pos' : ''}">${fmtBRL(total)}</strong></div>
-      <div class="card"><span>Pessoal</span><strong>${fmtBRL(pessoal)}</strong></div>
-      <div class="card"><span>Empresa</span><strong>${fmtBRL(empresa)}</strong></div>
-      <div class="card"><span>Sem categoria</span><strong class="${semCat.length ? 'neg' : ''}">${semCat.length}</strong>
-        ${semCat.length && !porAno ? `<a href="#/classificar/${ano}/${mes}" data-ir-classificar>Classificar →</a>` : ''}</div>
-    </section>
-
-    <section class="card filtros-lanc">
-      <div class="seg" role="group" aria-label="Pessoal ou empresa">
-        ${[['todos', 'Tudo'], ['pessoal', 'Pessoal'], ['empresa', 'Empresa']].map(([v, t]) =>
-          `<button data-escopo="${v}" class="${fc.escopo === v ? 'ativo' : ''}" aria-pressed="${fc.escopo === v}">${t}</button>`).join('')}
-      </div>
-      <select data-f="conta" aria-label="Conta ou cartão">
-        <option value="">Todas as contas e cartões</option>
-        ${cats().map((c) => `<option value="${c.id}" ${fc.conta === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
-      </select>
-    </section>
-
-    ${!temClasses ? cardSemClasses(tipo) : ''}
-
-    ${!despesas.length ? `<section class="card vazio"><h2>${tipo === 'receita' ? 'Nenhuma receita' : 'Nenhum gasto'} ${porAno ? `em ${ano}` : `em ${MESES[mes - 1].toLowerCase()}`}</h2>
-      <p>As categorias usam as transações (lançadas à mão ou importadas do extrato).</p>
-      <div class="acoes"><a class="btn primario" href="#/lancamentos/${ano}/${mes || new Date().getMonth() + 1}/${tipo === 'receita' ? 'receitas' : 'despesas'}">Ir para Transações</a></div></section>`
-    : `<div class="cat-grid">
-      <section class="card">
-        <h2>Divisão</h2>
-        <div class="rosca"><canvas id="g-rosca"></canvas><div class="rosca-centro"><span>Total</span><strong>${grande(total)}</strong></div></div>
-      </section>
-      <section class="card">
-        <h2>Por categoria</h2>
-        ${linhas.map((x) => `
-          <details class="cat-item">
-            <summary>
-              <span class="dot" style="background:${x.cor}"></span>
-              <span class="cat-nome">${esc(x.nome)}<small>${x.ls.length} ${palavra(x.ls.length)}${(() => { const n = x.subLista.filter((s) => !s.nome.endsWith('(geral)')).length; return n ? ` · ${n} ${n === 1 ? 'subcategoria' : 'subcategorias'}` : ''; })()}</small></span>
-              <span class="cat-barra"><i style="width:${(x.total / maior) * 100}%;background:${x.cor}"></i></span>
-              <span class="cat-valor"><b>${fmtBRL(x.total)}</b><small>${total ? Math.round((x.total / total) * 100) : 0}%</small></span>
-            </summary>
-            ${x.subLista.length ? `<div class="subcats">${x.subLista.map((s) => `<div class="subcat"><span class="dot" style="background:${s.cor}"></span><span>${esc(s.nome)}</span>
-              <span class="cat-barra"><i style="width:${(s.v / x.total) * 100}%;background:${s.cor}"></i></span><b>${fmtBRL(s.v)}</b></div>`).join('')}</div>` : ''}
-            <div class="cat-lista">
-              ${[...x.ls].sort((a, b) => b.data.localeCompare(a.data)).map((l) => `
-                <button class="lanc" data-id="${l.id}">
-                  <span class="lanc-txt"><b>${esc(l.descricao)}</b>
-                    <small>${fmtDia(l.data)} · ${classePorId(l.classe_id)?.pai_id ? esc(classePorId(l.classe_id).nome) + ' · ' : ''}${esc(l.conta || catPorId.get(l.categoria_id)?.nome || '')} · <span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo]}</span></small></span>
-                  <span class="lanc-valor">${fmtBRL(l.valor)}</span>
-                </button>`).join('')}
-            </div>
-          </details>`).join('')}
-      </section>
-    </div>`}
-    ${tabelaAno}`;
-
-  bindSemClasses(main);
-  main.querySelectorAll('[data-tipo-cat]').forEach((b) => b.addEventListener('click', () => { fc.tipo = b.dataset.tipoCat; render(); }));
-  main.querySelector('[data-ir-classificar]')?.addEventListener('click', () => { S.classTipo = tipo; });
-  main.querySelectorAll('[data-escopo]').forEach((b) => b.addEventListener('click', () => { fc.escopo = b.dataset.escopo; render(); }));
-  main.querySelector('[data-f="conta"]').addEventListener('change', (e) => { fc.conta = e.target.value; render(); });
-  main.querySelectorAll('.cat-lista .lanc').forEach((b) => b.addEventListener('click', () => {
-    const l = S.data.lancamentos.find((x) => x.id === b.dataset.id);
-    const [a, m] = l.data.split('-').map(Number);
-    abrirLancamento(l, { ano: a, mes: m });
-  }));
-  const canvas = main.querySelector('#g-rosca');
-  if (canvas && window.Chart) {
-    S.charts.push(new Chart(canvas, {
-      type: 'doughnut',
-      data: { labels: linhas.map((x) => x.nome), datasets: [{ data: linhas.map((x) => x.total), backgroundColor: linhas.map((x) => x.cor), borderWidth: 2, borderColor: cssVar('--surface') }] },
-      options: {
-        responsive: true, maintainAspectRatio: false, cutout: '68%',
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${fmtBRL(c.parsed)}` } } },
-      },
-    }));
-  }
-}
-
 /* ---------------------------------------------------------- filtro */
 const FILTRO_KEY = 'financas-filtro-v1';
 const PRESETS = {
@@ -3488,7 +3430,7 @@ function renderAjuda(main) {
           ${ehControle() ? `<div><dt>${ICON.lista} Transações</dt><dd>Abas Despesas, Receitas, Transferências (de uma conta para outra) e Extrato (tudo do mês, dia a dia). Também é onde se importa o extrato do banco.</dd></div>
           <div><dt>${ICON.calendario} Calendário</dt><dd>O mês em forma de calendário: receitas em verde, despesas na conta em vermelho, compras no cartão em azul, transferências em amarelo e os dias de fechamento/vencimento da fatura. Toque num dia para ver o que aconteceu.</dd></div>
           <div><dt>${ICON.classificar} Classificar</dt><dd>Os gastos sem categoria, agrupados por descrição. Um clique na categoria classifica o grupo e cria a regra para os próximos meses.</dd></div>
-          <div><dt>${ICON.categorias} Categorias</dt><dd>Quanto foi para cada categoria de gasto (Funcionários, Assinaturas…) e de onde veio cada receita (Vendas, Salário…), no mês ou no ano, de todas as contas juntas. Subcategorias (ex.: Mercado › Hortifruti) aparecem dentro da principal.</dd></div>
+          <div><dt>${ICON.grafico} Gráficos</dt><dd>Receitas e despesas mês a mês, pessoal × empresa, saldo das contas e, em <b>Por categoria</b>, quanto foi para cada categoria de gasto (Funcionários, Assinaturas…) e de onde veio cada receita (Vendas, Salário…). Toque numa categoria para ver as subcategorias e cada transação. <b>Classificar</b> é só onde se dá a categoria às transações novas.</dd></div>
           <div><dt>${ICON.cartao} Cartões</dt><dd>A fatura que vence no mês (pelas datas de fechamento e vencimento de cada cartão), se já foi paga e quanto do limite ainda está livre.</dd></div>` : ''}
           <div><dt>${ICON.ano} Ano · Resumo</dt><dd>O ano inteiro: total que entrou e saiu, divisão por cartão/categoria, melhores e piores meses, investimentos e evolução do saldo.</dd></div>
           <div><dt>${ICON.ano} Ano · Planilha</dt><dd>Igual à aba do ano no Excel: um mês por linha e as informações gerais ao lado. Toque num mês para editar.</dd></div>
@@ -3509,7 +3451,7 @@ function renderAjuda(main) {
             fatura contada duas vezes, repetidos) — corrija com um clique. Depois, os gastos parecidos vêm juntos (ex.: todos os Pix para o mesmo funcionário):
             clique na categoria e deixe "Lembrar" marcado para os próximos meses virem classificados sozinhos.</li>
           <li>Se um gasto da empresa saiu da conta pessoal (ou o contrário), troque o lado para <b>Empresa</b>/<b>Pessoal</b> antes de clicar.</li>
-          <li>Veja o resultado em <b>Categorias</b> (quanto foi para cada coisa) e na <b>Visão do mês</b>.</li>
+          <li>Veja o resultado em <b>Gráficos → Por categoria</b> (quanto foi para cada coisa) e na <b>Visão do mês</b>.</li>
         </ol>
         <p class="hint">No primeiro mês dá mais trabalho (criar as regras). Do segundo em diante, a maior parte já chega classificada.</p>
       </section>
