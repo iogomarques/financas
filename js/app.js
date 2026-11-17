@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117180020';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117180020';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117180020';
-import { lerPlanilha } from './importer.js?v=20261117180020';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117180020';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117180020';
-import { ILUSTRA } from './ilustra.js?v=20261117180020';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117180324';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117180324';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117180324';
+import { lerPlanilha } from './importer.js?v=20261117180324';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117180324';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117180324';
+import { ILUSTRA } from './ilustra.js?v=20261117180324';
 
 const app = document.getElementById('app');
 const S = {
@@ -496,9 +496,9 @@ function shell(r) {
         ${item(`#/lancamentos${sufixoMes}`, 'lancamentos', 'Transações', ICON.lista)}
         ${item(`#/classificar${sufixoMes}`, 'classificar', 'Classificar', ICON.classificar, pendentes ? `<b class="badge">${pendentes > 99 ? '99+' : pendentes}</b>` : '')}
         ${item(`#/cartoes${sufixoMes}`, 'cartoes', 'Cartões', ICON.cartao)}
-        ${item(`#/calendario${sufixoMes}`, 'calendario', 'Calendário', ICON.calendario)}
+        ${item(`#/calendario${sufixoMes}`, 'calendario', 'Calendário', ICON.calendario, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Análise</span>
-        ${item(`#/graficos${sufixoMes}`, 'graficos', 'Gráficos', ICON.grafico, '', 'so-desktop')}
+        ${item(`#/graficos${sufixoMes}`, 'graficos', 'Gráficos', ICON.grafico)}
         ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano, '', 'so-desktop')}
         ${item('#/geral', 'geral', 'Todos os anos', ICON.geral, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Configurar</span>
@@ -788,7 +788,7 @@ function renderMes(main, ano, mes) {
 
       ${creditos.length ? `
       <section class="card">
-        ${tituloCard('Cartões de crédito', 'Fatura de cada cartão que vence neste mês.', 'cartoes')}
+        ${tituloCard('Cartões de crédito', 'Fatura de cada cartão neste mês.', 'cartoes')}
         ${creditos.map(linhaCat).join('')}
         <div class="linha-total"><span>Total no crédito</span><strong>${fmtBRL(l.credito)}</strong></div>
       </section>` : ''}
@@ -1753,7 +1753,7 @@ function renderResumo(main, ano, mes) {
 
   main.innerHTML = `
     ${cabecalhoMes(ano, mes, '#/mes', `
-      <a class="btn" href="#/graficos/${ano}/${mes}">${ICON.grafico}<span>Gráficos</span></a>
+      <a class="btn" href="#/calendario/${ano}/${mes}">${ICON.calendario}<span>Calendário</span></a>
       <button class="btn primario" data-a="importar-mes">${ICON.upload}<span>Importar extrato</span></button>`)}
 
     ${pend || nConf ? `<div class="faixa-aviso">${ICON.classificar}
@@ -1799,7 +1799,7 @@ function renderResumo(main, ano, mes) {
         </section>
 
         <section class="card">
-          ${tituloCard('Cartões de crédito', 'Fatura de cada cartão neste mês.', 'cartoes')}
+          ${tituloCard('Cartões de crédito', 'Fatura de cada cartão que vence neste mês.', 'cartoes')}
           ${cartoes.length ? `<div class="tabela-wrap"><table class="tabela tabela-leve">
             <thead><tr><th>Cartão</th><th>Fechamento</th><th>Vencimento</th><th>Fatura</th><th>Limite disponível</th></tr></thead>
             <tbody>${cartoes.map((c) => {
