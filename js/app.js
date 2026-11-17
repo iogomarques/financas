@@ -1,9 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117004556';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117004556';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117004556';
-import { lerPlanilha } from './importer.js?v=20261117004556';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117004556';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117004556';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117010216';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117010216';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117010216';
+import { lerPlanilha } from './importer.js?v=20261117010216';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117010216';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117010216';
+import { ILUSTRA } from './ilustra.js?v=20261117010216';
 
 const app = document.getElementById('app');
 const S = {
@@ -314,7 +315,7 @@ function rota() {
   if (h[0] === 'ajuda') return { view: 'ajuda' };
   if (h[0] === 'geral') return { view: 'geral' };
   const ano = Number(h[1]), mes = Number(h[2]);
-  if (h[0] === 'lancamentos' || h[0] === 'classificar') {
+  if (h[0] === 'lancamentos' || h[0] === 'classificar' || h[0] === 'cartoes') {
     if (ano && mes >= 1 && mes <= 12) return { view: h[0], ano, mes };
     return { view: h[0], ...mesPadrao() };
   }
@@ -409,6 +410,7 @@ function render() {
   app.innerHTML = shell(r);
   const main = app.querySelector('main');
   if (r.view === 'mes') renderMes(main, r.ano, r.mes);
+  else if (r.view === 'cartoes') renderCartoes(main, r.ano, r.mes);
   else if (r.view === 'lancamentos') renderLancamentos(main, r.ano, r.mes);
   else if (r.view === 'classificar') renderClassificar(main, r.ano, r.mes);
   else if (r.view === 'categorias') renderCategorias(main, r.ano, r.mes);
@@ -434,22 +436,24 @@ function shell(r) {
   const menu = controle
     ? `<span class="nav-titulo">Mês a mês</span>
         ${item(`#/mes${sufixoMes}`, 'mes', 'Visão do mês', ICON.mes)}
+        ${item(`#/cartoes${sufixoMes}`, 'cartoes', 'Cartões', ICON.cartao)}
         ${item(`#/lancamentos${sufixoMes}`, 'lancamentos', 'Lançamentos', ICON.lista)}
         ${item(`#/classificar${sufixoMes}`, 'classificar', 'Classificar', ICON.classificar, pendentes ? `<b class="badge">${pendentes > 99 ? '99+' : pendentes}</b>` : '')}
         ${item(`#/categorias${sufixoMes}`, 'categorias', 'Categorias', ICON.categorias)}
         <span class="nav-titulo nav-sep">Análise</span>
-        ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano)}
+        ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano, '', 'so-desktop')}
         ${item('#/geral', 'geral', 'Todos os anos', ICON.geral, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Configurar</span>
         ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
         ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda, '', 'so-desktop')}`
     : `<span class="nav-titulo">Menu</span>
         ${item(`#/mes${sufixoMes}`, 'mes', 'Visão do mês', ICON.mes)}
+        ${item(`#/cartoes${sufixoMes}`, 'cartoes', 'Cartões', ICON.cartao)}
         ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano)}
         ${item('#/geral', 'geral', 'Todos os anos', ICON.geral)}
         <span class="nav-titulo nav-sep">Configurar</span>
         ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
-        ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda)}`;
+        ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda, '', 'so-desktop')}`;
   return `
   <div class="layout">
     <aside class="lateral">
@@ -703,6 +707,7 @@ function renderMes(main, ano, mes) {
             <div><span>Receita</span><strong>${fmtBRL(l.receita)}</strong>${delta(l.receita, ant.receita, vsAnt)}</div>
             <div><span>Despesas</span><strong>${fmtBRL(l.totalDesp)}</strong>${delta(l.totalDesp, ant.totalDesp, vsAnt, true)}</div>
           </div>
+          <div class="ilustra hero-ilustra">${ILUSTRA.carteira}</div>
         </div>
         <div class="barra-empilhada" role="img" aria-label="Divisão da receita">
           ${partes.map((x) => `<span style="width:${(x.valor / base) * 100}%;background:${x.cor}" title="${esc(x.nome)}: ${fmtBRL(x.valor)}"></span>`).join('')}
@@ -713,7 +718,7 @@ function renderMes(main, ano, mes) {
       </section>
 
       <section class="card">
-        <h2>Saldo financeiro</h2>
+        ${tituloCard('Saldo financeiro', 'Quanto você tinha no dia 1º e quanto o dinheiro guardado cresceu.', 'cofre')}
         <dl class="lista">
           <div><dt>Saldo inicial (1º de ${MESES_CURTO[mes - 1].toLowerCase()})</dt><dd>${fmtBRL(l.saldoIni)}</dd></div>
           <div><dt>Saldo final (1º de ${MESES_CURTO[prox.mes - 1].toLowerCase()})</dt><dd>${fmtBRL(l.saldoFin)}</dd></div>
@@ -724,20 +729,20 @@ function renderMes(main, ano, mes) {
 
       ${creditos.length ? `
       <section class="card">
-        <h2>Cartões de crédito</h2>
+        ${tituloCard('Cartões de crédito', 'Fatura de cada cartão neste mês.', 'cartoes')}
         ${creditos.map(linhaCat).join('')}
         <div class="linha-total"><span>Total no crédito</span><strong>${fmtBRL(l.credito)}</strong></div>
       </section>` : ''}
 
       ${debitos.length ? `
       <section class="card">
-        <h2>Débito / conta</h2>
+        ${tituloCard('Débito e contas', 'O que saiu direto da conta: Pix, boleto, débito.')}
         ${debitos.map(linhaCat).join('')}
         <div class="linha-total"><span>Total no débito</span><strong>${fmtBRL(l.debito)}</strong></div>
       </section>` : ''}
 
       <section class="card">
-        <h2>Investimento</h2>
+        ${tituloCard('Investimento', 'Quanto foi guardado e quanto rendeu.', 'cofrinho')}
         <dl class="lista">
           <div><dt>Investido no mês</dt><dd>${fmtBRL(l.investimento)}</dd></div>
           <div><dt>Meta (${fmtPct(p.pct_investir)} da receita)</dt><dd>${fmtBRL(metaInvest)}</dd></div>
@@ -750,7 +755,7 @@ function renderMes(main, ano, mes) {
       </section>
 
       <section class="card">
-        <h2>Comparado à média de ${ano}</h2>
+        ${tituloCard(`Comparado à média de ${ano}`, 'Este mês ficou acima ou abaixo do normal?', 'grafico')}
         <dl class="lista">
           <div><dt>Receita</dt><dd>${fmtBRL(l.receita)} ${delta(l.receita, st.mediaReceita, 'vs média')}</dd></div>
           <div><dt>Despesas</dt><dd>${fmtBRL(l.totalDesp)} ${delta(l.totalDesp, st.mediaDespesas, 'vs média', true)}</dd></div>
@@ -774,7 +779,7 @@ function renderMes(main, ano, mes) {
         const pend = semClasse(gastos).length;
         const pctEmp = tot ? (emp / tot) * 100 : 0;
         return `<section class="card">
-          <h2>Gastos por categoria</h2>
+          ${tituloCard('Gastos por categoria', 'Com o que o dinheiro foi gasto.')}
           <div class="divisao" title="Pessoal × empresa">
             <div class="divisao-barra"><span style="width:${100 - pctEmp}%"></span><span class="emp" style="width:${pctEmp}%"></span></div>
             <div class="divisao-leg"><span>Pessoal <b>${fmtBRL(tot - emp)}</b></span><span>Empresa <b>${fmtBRL(emp)}</b></span></div>
@@ -794,7 +799,7 @@ function renderMes(main, ano, mes) {
         if (!doMes.length) return '';
         const catPorId = new Map(S.data.categorias.map((x) => [x.id, x]));
         return `<section class="card">
-          <h2>Últimos lançamentos</h2>
+          ${tituloCard('Últimos lançamentos')}
           ${doMes.map((x) => {
             const entrada = x.destino === 'receita' || x.destino === 'rendimento';
             return `<div class="linha-cat"><span class="dot" style="background:${catPorId.get(x.categoria_id) ? corCat(catPorId.get(x.categoria_id)) : 'var(--pos)'}"></span>
@@ -806,7 +811,7 @@ function renderMes(main, ano, mes) {
       })()}
 
       <section class="card grafico largo">
-        <h2>Últimos 6 meses</h2>
+        ${tituloCard('Últimos 6 meses', 'Receita, despesas e sobra de cada mês.')}
         <div class="canvas-box"><canvas id="g-mes"></canvas></div>
       </section>
 
@@ -1371,6 +1376,166 @@ function abrirImportacao({ ano, mes }) {
   dlg.showModal();
 }
 
+/* ============================================================ cartões */
+// Cores dos cartões desenhados (nomes genéricos; o nome do banco é escrito pelo usuário)
+const ESTILOS = {
+  preto: { nome: 'Preto', bg: 'linear-gradient(135deg,#3a3f47 0%,#16181c 55%,#0b0c0e 100%)', tx: '#f8fafc' },
+  grafite: { nome: 'Grafite', bg: 'linear-gradient(135deg,#64748b,#334155)', tx: '#f8fafc' },
+  azul: { nome: 'Azul', bg: 'linear-gradient(135deg,#38bdf8,#0284c7 60%,#075985)', tx: '#ffffff' },
+  marinho: { nome: 'Azul-marinho', bg: 'linear-gradient(135deg,#1e40af,#172554)', tx: '#f8fafc' },
+  roxo: { nome: 'Roxo', bg: 'linear-gradient(135deg,#a855f7,#7e22ce 60%,#581c87)', tx: '#ffffff' },
+  vermelho: { nome: 'Vermelho', bg: 'linear-gradient(135deg,#f43f5e,#be123c 60%,#881337)', tx: '#ffffff' },
+  laranja: { nome: 'Laranja', bg: 'linear-gradient(135deg,#fb923c,#ea580c 60%,#9a3412)', tx: '#ffffff' },
+  amarelo: { nome: 'Amarelo', bg: 'linear-gradient(135deg,#fde047,#facc15 55%,#eab308)', tx: '#1f2937' },
+  verde: { nome: 'Verde', bg: 'linear-gradient(135deg,#34d399,#059669 60%,#065f46)', tx: '#ffffff' },
+  dourado: { nome: 'Dourado', bg: 'linear-gradient(135deg,#fde68a,#d97706 70%,#92400e)', tx: '#1f2937' },
+  prata: { nome: 'Prata', bg: 'linear-gradient(135deg,#f1f5f9,#cbd5e1 55%,#94a3b8)', tx: '#1e293b' },
+};
+const ORDEM_ESTILOS_CREDITO = ['preto', 'azul', 'roxo', 'vermelho', 'laranja', 'verde', 'marinho', 'dourado'];
+/** Cor do cartão: a escolhida em Ajustes, ou uma padrão pela ordem. */
+function estiloDe(cat) {
+  if (cat.estilo && ESTILOS[cat.estilo]) return cat.estilo;
+  if (cat.tipo === 'debito') return 'grafite';
+  const i = cats().filter((c) => c.tipo === 'credito').findIndex((c) => c.id === cat.id);
+  return ORDEM_ESTILOS_CREDITO[Math.max(0, i) % ORDEM_ESTILOS_CREDITO.length];
+}
+
+const CHIP = `<svg class="cv-chip" viewBox="0 0 40 30" aria-hidden="true"><rect x="1" y="1" width="38" height="28" rx="5" fill="#e9c46a" stroke="#c99a2e"/>
+  <path d="M1 11h12M1 19h12M27 11h12M27 19h12M13 1v28M27 1v28M13 15h14" stroke="#b9862a" stroke-width="1.4" fill="none"/></svg>`;
+const SEM_CONTATO = `<svg class="cv-nfc" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+  <path d="M8.5 7.5a6 6 0 0 1 0 9M12 5a9.5 9.5 0 0 1 0 14M15.5 2.5a13 13 0 0 1 0 19"/></svg>`;
+
+/** Cartão desenhado. */
+function cartaoVisual(cat, { valor = null, rotulo = 'Fatura do mês', classe = '', atributos = '' } = {}) {
+  const e = ESTILOS[estiloDe(cat)];
+  return `<div class="cartao-vis ${classe}" style="--cv-bg:${e.bg};--cv-tx:${e.tx}" ${atributos}>
+    <div class="cv-topo"><b class="cv-banco">${esc(cat.banco || cat.nome)}</b><span class="cv-tipo">${cat.tipo === 'credito' ? 'Crédito' : 'Débito'}</span></div>
+    <div class="cv-meio">${CHIP}${SEM_CONTATO}</div>
+    <div class="cv-pe">
+      <div class="cv-dono"><small>${esc(cat.banco ? cat.nome : 'Titular')}</small><span>${esc(cat.titular || (cat.banco ? '' : '—'))}</span></div>
+      ${valor !== undefined ? `<div class="cv-valor"><small>${rotulo}</small><strong>${valor === null ? '—' : grande(valor)}</strong></div>` : ''}
+    </div>
+  </div>`;
+}
+
+/** Título de quadro com subtítulo curto e ilustração (deixa claro o que o quadro mostra). */
+function tituloCard(titulo, sub = '', ilustra = '') {
+  return `<div class="card-cab">
+    <div><h2>${titulo}</h2>${sub ? `<p class="sub">${sub}</p>` : ''}</div>
+    ${ilustra && ILUSTRA[ilustra] ? `<div class="ilustra">${ILUSTRA[ilustra]}</div>` : ''}
+  </div>`;
+}
+
+function renderCartoes(main, ano, mes) {
+  const todas = cats();
+  const acoes = ehControle()
+    ? `<button class="btn primario" data-a="importar-mes">${ICON.upload}<span>Importar extrato</span></button>`
+    : `<button class="btn primario" data-a="editar">${ICON.editar}<span>Lançar / editar mês</span></button>`;
+  if (!todas.length) {
+    main.innerHTML = `${cabecalhoMes(ano, mes, '#/cartoes', '')}
+      <section class="card vazio">${tituloCard('Nenhum cartão cadastrado', 'Cadastre seus cartões e contas em Ajustes para vê-los aqui.', 'cartoes')}
+        <div class="acoes"><a class="btn primario" href="#/ajustes">Cadastrar cartões</a></div></section>`;
+    return;
+  }
+  const map = indexMeses(efetivos());
+  const pa = anterior(ano, mes);
+  const l = linhaMes(ano, mes, map, todas);
+  const ant = linhaMes(pa.ano, pa.mes, map, todas);
+  const doAno = linhasDoAno(ano, map, todas);
+  const creditos = todas.filter((c) => c.tipo === 'credito' && (c.ativo !== false || l.desp[c.id] !== null));
+  const debitos = todas.filter((c) => c.tipo === 'debito' && (c.ativo !== false || l.desp[c.id] !== null));
+  const totCred = creditos.reduce((s, c) => s + (l.desp[c.id] ?? 0), 0);
+  const totCredAnt = creditos.reduce((s, c) => s + (ant.desp[c.id] ?? 0), 0);
+  const totDeb = debitos.reduce((s, c) => s + (l.desp[c.id] ?? 0), 0);
+  const sel = todas.find((c) => c.id === S.cartaoSel) || creditos[0] || debitos[0];
+  S.cartaoSel = sel?.id;
+
+  // Detalhes do cartão escolhido
+  const vals = doAno.map((x) => x.desp[sel.id]).filter((v) => v !== null && v !== undefined);
+  const media = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  const maior = doAno.filter((x) => x.desp[sel.id] !== null).sort((a, b) => b.desp[sel.id] - a.desp[sel.id])[0];
+  const totalAno = vals.reduce((a, b) => a + b, 0);
+  const compras = ehControle()
+    ? S.data.lancamentos.filter((x) => x.categoria_id === sel.id && x.destino === 'despesa' && String(x.data).startsWith(`${ano}-${pad2(mes)}`))
+      .sort((a, b) => b.data.localeCompare(a.data))
+    : [];
+
+  const grade = (lista) => `<div class="cartoes-grade">${lista.map((c) => cartaoVisual(c, {
+    valor: l.desp[c.id], rotulo: c.tipo === 'credito' ? `Fatura de ${MESES_CURTO[mes - 1].toLowerCase()}` : `Gastos em ${MESES_CURTO[mes - 1].toLowerCase()}`,
+    classe: `clicavel ${c.id === sel.id ? 'selecionado' : ''}`, atributos: `data-cartao="${c.id}" tabindex="0" role="button" aria-pressed="${c.id === sel.id}"`,
+  })).join('')}</div>`;
+
+  main.innerHTML = `
+    ${cabecalhoMes(ano, mes, '#/cartoes', acoes)}
+
+    <section class="card resumo-cartoes">
+      ${tituloCard(`Cartões em ${MESES[mes - 1].toLowerCase()}`, 'Quanto foi gasto em cada cartão e conta neste mês.', 'cartoes')}
+      <div class="resumo-cartoes-nums">
+        <div><span>Total nos cartões de crédito</span><strong>${grande(totCred)}</strong>${delta(totCred, totCredAnt, `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`, true)}</div>
+        <div><span>Total no débito / contas</span><strong>${grande(totDeb)}</strong></div>
+        <div><span>Cartões e contas</span><strong>${creditos.length + debitos.length}</strong></div>
+      </div>
+    </section>
+
+    ${creditos.length ? `<section><h2 class="secao">Cartões de crédito</h2>${grade(creditos)}</section>` : ''}
+    ${debitos.length ? `<section><h2 class="secao">Contas e débito</h2>${grade(debitos)}</section>` : ''}
+
+    <section class="card detalhe-cartao">
+      <div class="detalhe-grid">
+        <div class="detalhe-vis">${cartaoVisual(sel, { valor: l.desp[sel.id], rotulo: sel.tipo === 'credito' ? 'Fatura do mês' : 'Gastos do mês', classe: 'grande' })}</div>
+        <div>
+          ${tituloCard(esc(sel.banco || sel.nome), `${sel.banco ? esc(sel.nome) + ' · ' : ''}${sel.tipo === 'credito' ? 'cartão de crédito' : 'conta / débito'}${sel.titular ? ' · ' + esc(sel.titular) : ''}`)}
+          <dl class="lista">
+            <div><dt>${sel.tipo === 'credito' ? 'Fatura' : 'Gastos'} de ${MESES[mes - 1].toLowerCase()}</dt><dd>${fmtBRL(l.desp[sel.id])}${delta(l.desp[sel.id], ant.desp[sel.id], `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`, true)}</dd></div>
+            <div><dt>${MESES[pa.mes - 1]}</dt><dd>${fmtBRL(ant.desp[sel.id])}</dd></div>
+            <div><dt>Média por mês em ${ano}</dt><dd>${fmtBRL(media)}</dd></div>
+            <div><dt>Maior do ano</dt><dd>${maior ? `${fmtBRL(maior.desp[sel.id])}<small>${MESES[maior.mes - 1]}</small>` : '—'}</dd></div>
+            <div class="destaque"><dt>Total em ${ano}</dt><dd>${fmtBRL(totalAno)}</dd></div>
+          </dl>
+        </div>
+      </div>
+      <h3 class="sub-secao">Últimos 12 meses</h3>
+      <div class="canvas-box pequeno"><canvas id="g-cartao"></canvas></div>
+      ${ehControle() ? `<h3 class="sub-secao">Compras de ${MESES[mes - 1].toLowerCase()}</h3>
+        ${compras.length ? compras.map((x) => `<button class="lanc" data-id="${x.id}">
+          <span class="lanc-icone" style="--cor:${classePorId(x.classe_id)?.cor || '#94a3b8'}">↑</span>
+          <span class="lanc-txt"><b>${esc(x.descricao)}</b><small>${fmtDia(x.data)} · ${esc(classePorId(x.classe_id)?.nome || 'sem categoria')} · ${LADO[x.escopo] || ''}</small></span>
+          <span class="lanc-valor neg">− ${fmtBRL(x.valor)}</span></button>`).join('')
+          : '<p class="sub">Nenhuma compra lançada neste cartão no mês. Importe o extrato do cartão em Lançamentos.</p>'}` : ''}
+    </section>`;
+
+  main.querySelectorAll('[data-cartao]').forEach((el) => {
+    const escolher = () => { S.cartaoSel = el.dataset.cartao; render(); app.querySelector('.detalhe-cartao')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    el.addEventListener('click', escolher);
+    el.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); escolher(); } });
+  });
+  main.querySelectorAll('[data-a="editar"]').forEach((b) => b.addEventListener('click', () => abrirEditor(ano, mes)));
+  main.querySelectorAll('.detalhe-cartao .lanc').forEach((b) => b.addEventListener('click', () => {
+    abrirLancamento(S.data.lancamentos.find((x) => x.id === b.dataset.id), { ano, mes });
+  }));
+  // Gráfico dos últimos 12 meses do cartão escolhido
+  const canvas = main.querySelector('#g-cartao');
+  if (canvas && window.Chart) {
+    const meses12 = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(ano, mes - 1 - i, 1);
+      const x = linhaMes(d.getFullYear(), d.getMonth() + 1, map, todas);
+      meses12.push({ rotulo: `${MESES_CURTO[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`, v: x.desp[sel.id] });
+    }
+    const cor = { preto: '#334155', grafite: '#64748b', prata: '#94a3b8', amarelo: '#eab308', dourado: '#d97706' }[estiloDe(sel)]
+      || (ESTILOS[estiloDe(sel)].bg.match(/#[0-9a-f]{6}/gi) || ['#0d9488'])[1];
+    S.charts.push(new Chart(canvas, {
+      type: 'bar',
+      data: { labels: meses12.map((x) => x.rotulo), datasets: [{ label: sel.banco || sel.nome, data: meses12.map((x) => x.v), backgroundColor: meses12.map((_, i) => (i === 11 ? cor : cor + '88')), borderRadius: 6, maxBarThickness: 34 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmtBRL(c.parsed.y) } } },
+        scales: { x: { grid: { display: false }, ticks: { color: cssVar('--muted') } }, y: { grid: { color: cssVar('--border') }, ticks: { color: cssVar('--muted'), callback: (v) => v.toLocaleString('pt-BR') } } },
+      },
+    }));
+  }
+}
+
 /* ========================================================= classificar */
 function cardSemClasses() {
   return `<section class="card destaque-acao">
@@ -1800,43 +1965,36 @@ function renderGeral(main) {
       ]],
     ])}
     <div class="coluna">
-    <section class="card">
-      <h2>Por ano</h2>
-      <div class="tabela-wrap">
-        <table class="tabela">
-          <thead><tr>
-            <th>Ano</th><th>Gasto total</th><th>Gasto crédito</th><th>Receita total</th><th>Saldo total</th>
-            <th>Média receita/mês</th><th>Média despesas/mês</th><th>Total investido</th><th>Rendimento</th><th>Resultado saldo</th>
-          </tr></thead>
-          <tbody>
-            ${porAno.map(({ ano, linhas }) => {
-              const s = estatisticas(linhas, c, prefs());
-              return `<tr class="clicavel" data-ano="${ano}">
-                <th><a href="#/ano/${ano}">${ano}</a></th>
-                <td>${fmtBRL(s.gastoTotal)}</td><td>${fmtBRL(s.creditoTotal)}</td><td>${fmtBRL(s.receitaTotal)}</td>
-                <td>${money(s.saldoTotal)}</td><td>${fmtBRL(s.mediaReceita)}</td><td>${fmtBRL(s.mediaDespesas)}</td>
-                <td>${fmtBRL(s.totalInvestido)}</td><td>${fmtBRL(s.totalRendimento)}</td><td>${money(s.resultadoAcumulado)}</td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-          <tfoot><tr>
-            <th>Total / média</th>
-            <td>${fmtBRL(st.gastoTotal)}</td><td>${fmtBRL(st.creditoTotal)}</td><td>${fmtBRL(st.receitaTotal)}</td>
-            <td>${money(st.saldoTotal)}</td><td>${fmtBRL(st.mediaReceita)}</td><td>${fmtBRL(st.mediaDespesas)}</td>
-            <td>${fmtBRL(st.totalInvestido)}</td><td>${fmtBRL(st.totalRendimento)}</td><td>${money(st.resultadoAcumulado)}</td>
-          </tr></tfoot>
-        </table>
+    <section>
+      <h2 class="secao">Ano a ano</h2>
+      <div class="anos-grade">
+        ${[...porAno].reverse().map(({ ano, linhas }) => {
+          const s = estatisticas(linhas, c, prefs());
+          const maior = Math.max(s.receitaTotal, s.gastoTotal) || 1;
+          return `<a class="card ano-card" href="#/ano/${ano}">
+            <div class="ano-card-topo"><b>${ano}</b><span class="sub">${s.mesesComDados} ${s.mesesComDados === 1 ? 'mês' : 'meses'}</span></div>
+            <div class="ano-sobra"><span>Sobra</span><strong class="${cls(s.saldoTotal)}">${grande(s.saldoTotal)}</strong></div>
+            <div class="ano-barras" aria-hidden="true">
+              <div><span>Receita</span><i style="width:${(s.receitaTotal / maior) * 100}%;background:var(--c-receita)"></i><b>${fmtBRL(s.receitaTotal)}</b></div>
+              <div><span>Gastos</span><i style="width:${(s.gastoTotal / maior) * 100}%;background:var(--c-despesa)"></i><b>${fmtBRL(s.gastoTotal)}</b></div>
+            </div>
+            <dl class="lista compacta">
+              <div><dt>Investido</dt><dd>${fmtBRL(s.totalInvestido)}</dd></div>
+              <div><dt>Resultado do saldo</dt><dd class="${cls(s.resultadoAcumulado)}">${fmtBRL(s.resultadoAcumulado)}</dd></div>
+            </dl>
+            <span class="ano-ver">Ver o ano →</span>
+          </a>`;
+        }).join('')}
       </div>
     </section>
     <section class="card grafico">
-      <h2>Receita × despesas por mês</h2>
+      ${tituloCard('Receita × despesas por mês', 'Todos os meses lançados, do primeiro ao último.', 'grafico')}
       <div class="canvas-box"><canvas id="g-geral"></canvas></div>
     </section>
     </div>
     </section>`;
 
   bindFiltro(main, todasCats);
-  main.querySelectorAll('tr[data-ano]').forEach((tr) => tr.addEventListener('click', () => (location.hash = `#/ano/${tr.dataset.ano}`)));
   // Gráfico: do primeiro ao último mês com dados
   const ini = todas.indexOf(comDados[0]);
   const fim = todas.indexOf(comDados[comDados.length - 1]);
@@ -1949,6 +2107,7 @@ function renderAnoResumo(main, ano) {
             <div><span>Receita do ano</span><strong>${fmtBRL(receita)}</strong>${temAnt ? delta(receita, stAnt.receitaTotal, vsAnt) : ''}</div>
             <div><span>Despesas do ano</span><strong>${fmtBRL(st.gastoTotal)}</strong>${temAnt ? delta(st.gastoTotal, stAnt.gastoTotal, vsAnt, true) : ''}</div>
           </div>
+          <div class="ilustra hero-ilustra">${ILUSTRA.carteira}</div>
         </div>
         <div class="barra-empilhada" role="img" aria-label="Divisão da receita do ano">
           ${partes.map((x) => `<span style="width:${(x.valor / base) * 100}%;background:${x.cor}" title="${esc(x.nome)}: ${fmtBRL(x.valor)}"></span>`).join('')}
@@ -1959,7 +2118,7 @@ function renderAnoResumo(main, ano) {
       </section>
 
       <section class="card">
-        <h2>Médias por mês</h2>
+        ${tituloCard('Médias por mês', 'Contam só os meses lançados.', 'calendario')}
         <dl class="lista">
           <div><dt>Receita</dt><dd>${fmtBRL(st.mediaReceita)}</dd></div>
           <div><dt>Despesas</dt><dd>${fmtBRL(st.mediaDespesas)}</dd></div>
@@ -1971,12 +2130,12 @@ function renderAnoResumo(main, ano) {
       </section>
 
       <section class="card grafico largo">
-        <h2>Mês a mês em ${ano}</h2>
+        ${tituloCard(`Mês a mês em ${ano}`, 'Receita, despesas e sobra de cada mês.')}
         <div class="canvas-box"><canvas id="g-ano"></canvas></div>
       </section>
 
       <section class="card">
-        <h2>Cartões e categorias no ano</h2>
+        ${tituloCard('Cartões e contas no ano', 'Quanto foi gasto em cada um.', 'cartoes')}
         ${st.porCategoria.filter((x) => x.meses).map((x) => `
           <div class="linha-cat">
             <span class="dot" style="background:${corCat(x.cat)}"></span>
@@ -1987,7 +2146,7 @@ function renderAnoResumo(main, ano) {
       </section>
 
       <section class="card">
-        <h2>Destaques do ano</h2>
+        ${tituloCard('Destaques do ano', 'Os melhores e os piores meses.', 'grafico')}
         <dl class="lista">
           <div><dt>Melhor mês (maior sobra)</dt><dd>${nomeMes(melhor)}<small class="pos">${melhor ? fmtBRL(melhor.saldoMes) : ''}</small></dd></div>
           <div><dt>Pior mês (menor sobra)</dt><dd>${nomeMes(pior)}<small class="${cls(pior?.saldoMes)}">${pior ? fmtBRL(pior.saldoMes) : ''}</small></dd></div>
@@ -1998,7 +2157,7 @@ function renderAnoResumo(main, ano) {
       </section>
 
       <section class="card">
-        <h2>Investimentos</h2>
+        ${tituloCard('Investimentos', 'Total guardado e a meta do ano.', 'cofrinho')}
         <dl class="lista">
           <div><dt>Total investido</dt><dd>${fmtBRL(st.totalInvestido)}</dd></div>
           <div><dt>Meta do ano (${fmtPct(p.pct_investir)} da receita)</dt><dd>${fmtBRL(metaAno)}</dd></div>
@@ -2011,7 +2170,7 @@ function renderAnoResumo(main, ano) {
       </section>
 
       <section class="card">
-        <h2>Saldo financeiro</h2>
+        ${tituloCard('Saldo financeiro', 'Como o dinheiro guardado evoluiu no ano.', 'cofre')}
         <dl class="lista">
           <div><dt>Saldo no início do ano</dt><dd>${fmtBRL(st.saldoInicio)}</dd></div>
           <div><dt>Último saldo informado</dt><dd>${fmtBRL(st.ultimoSaldo)}</dd></div>
@@ -2021,7 +2180,7 @@ function renderAnoResumo(main, ano) {
       </section>
 
       <section class="card">
-        <h2>Organização</h2>
+        ${tituloCard('Metas', 'A média do ano comparada às metas.', 'alvo')}
         <dl class="lista">
           <div><dt>Máximo para gastar por mês (${fmtPct(p.pct_max_gasto)})</dt><dd>${fmtBRL(maxGastar)}</dd></div>
           <div><dt>Despesa média por mês</dt><dd class="${st.mediaDespesas > maxGastar ? 'neg' : 'pos'}">${fmtBRL(st.mediaDespesas)}</dd></div>
@@ -2031,13 +2190,13 @@ function renderAnoResumo(main, ano) {
       </section>
 
       <section class="card grafico">
-        <h2>Evolução do saldo (dia 1º de cada mês)</h2>
+        ${tituloCard('Evolução do saldo', 'Saldo no dia 1º de cada mês.')}
         <div class="canvas-box pequeno"><canvas id="g-saldo"></canvas></div>
       </section>
 
       ${temAnt ? `
       <section class="card largo">
-        <h2>Comparado a ${ano - 1}</h2>
+        ${tituloCard(`Comparado a ${ano - 1}`, 'Este ano contra o anterior.', 'grafico')}
         <div class="comparativo">
           ${[
             ['Receita', st.receitaTotal, stAnt.receitaTotal, false],
@@ -2512,7 +2671,21 @@ function renderAjustes(main) {
                 ? `<button class="btn" data-a="ativo">${cat.ativo === false ? 'Reativar' : 'Arquivar'}</button>`
                 : '<button class="btn perigo" data-a="del">Excluir</button>'}
             </div>
-          </div>`).join('') || '<p class="sub">Nenhuma categoria ainda.</p>'}
+            <details class="aparencia">
+              <summary>Aparência do cartão</summary>
+              <div class="aparencia-grid">
+                <div class="aparencia-campos">
+                  <label class="campo"><span>Banco / nome no cartão</span><input name="banco" maxlength="40" placeholder="Ex.: Mercado Pago, Santander" value="${esc(cat.banco || '')}"></label>
+                  <label class="campo"><span>Titular</span><input name="titular" maxlength="40" placeholder="Ex.: Iogo, Ivoney" value="${esc(cat.titular || '')}"></label>
+                  <div class="campo"><span>Cor</span>
+                    <div class="cores">${Object.entries(ESTILOS).map(([k, e]) => `<button type="button" class="cor-op ${estiloDe(cat) === k ? 'ativo' : ''}" data-estilo="${k}"
+                      style="--cv-bg:${e.bg}" title="${e.nome}" aria-label="${e.nome}" aria-pressed="${estiloDe(cat) === k}"></button>`).join('')}</div>
+                  </div>
+                </div>
+                ${cartaoVisual(cat, { valor: 1234.56, rotulo: 'Exemplo', classe: 'previa' })}
+              </div>
+            </details>
+          </div>`).join('') || '<p class="sub">Nenhuma conta ou cartão ainda.</p>'}
       </div>
       <form class="nova-cat">
         <input name="nome" placeholder="Nova conta ou cartão (ex.: Cartão empresa)" required>
@@ -2640,6 +2813,23 @@ function renderAjustes(main) {
       toast('Nome atualizado.');
     });
     row.querySelector('[name="tipo"]').addEventListener('change', async (e) => { await salvarCat({ tipo: e.target.value }); toast('Tipo atualizado.'); });
+    // Aparência do cartão (banco, titular, cor) — atualiza só a prévia, sem redesenhar a tela
+    const atualizarPrevia = () => {
+      const prev = row.querySelector('.previa');
+      if (prev) prev.outerHTML = cartaoVisual(cat, { valor: 1234.56, rotulo: 'Exemplo', classe: 'previa' });
+    };
+    for (const campo of ['banco', 'titular']) {
+      row.querySelector(`[name="${campo}"]`).addEventListener('change', async (e) => {
+        await salvarCat({ [campo]: e.target.value.trim() || null });
+        atualizarPrevia();
+        toast('Cartão atualizado.');
+      });
+    }
+    row.querySelectorAll('[data-estilo]').forEach((b) => b.addEventListener('click', async () => {
+      await salvarCat({ estilo: b.dataset.estilo });
+      row.querySelectorAll('[data-estilo]').forEach((x) => { x.classList.toggle('ativo', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+      atualizarPrevia();
+    }));
     row.querySelectorAll('[data-a]').forEach((b) => b.addEventListener('click', async () => {
       const a = b.dataset.a;
       if (a === 'up' || a === 'down') {
@@ -2867,6 +3057,7 @@ const ICON = {
   ano: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>'),
   ajustes: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   mais: svg('<path d="M12 5v14M5 12h14"/>'),
+  cartao: svg('<rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M2 10h20M6 15h4"/>'),
   editar: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
   classificar: svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>'),
   categorias: svg('<path d="M21.2 15.9A10 10 0 1 1 8 2.8"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>'),

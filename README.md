@@ -61,3 +61,11 @@ no próprio navegador e grava só no seu banco Supabase.
 Antes de cada commit, rode `sh versao.sh` (carimba uma versão nova nos arquivos para os
 navegadores não misturarem arquivos antigos do cache com os novos). Depois `git push`:
 o GitHub Pages publica em ~1 minuto.
+
+## Voltar a um visual anterior (backup)
+Cada mudança grande de visual ganha uma marcação no GitHub antes de começar:
+
+- `backup-visual-2026-11-17` — visual antes da aba Cartões e das ilustrações
+
+Para voltar: `git checkout backup-visual-2026-11-17 -- css js index.html`, rodar `sh versao.sh`, fazer commit e `git push`.
+(O banco de dados não precisa mudar: as colunas novas são ignoradas pelo visual antigo.)

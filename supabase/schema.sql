@@ -257,3 +257,8 @@ alter table public.fin_preferencias add column if not exists meus_nomes text[] n
 -- Modo de uso (aplicado em 17/11/2026): 'organizacao' (planilha) ou 'controle' (extratos e categorias).
 -- Vazio = ainda não escolheu (o site pergunta).
 alter table public.fin_preferencias add column if not exists modo text check (modo in ('organizacao', 'controle'));
+
+-- Aparência dos cartões na aba Cartões (aplicado em 17/11/2026)
+alter table public.fin_categorias add column if not exists banco   text check (char_length(banco) <= 40);
+alter table public.fin_categorias add column if not exists estilo  text check (char_length(estilo) <= 20);
+alter table public.fin_categorias add column if not exists titular text check (char_length(titular) <= 40);
