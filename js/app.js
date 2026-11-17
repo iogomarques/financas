@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117182259';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117182259';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117182259';
-import { lerPlanilha } from './importer.js?v=20261117182259';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117182259';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117182259';
-import { ILUSTRA } from './ilustra.js?v=20261117182259';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117184830';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117184830';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117184830';
+import { lerPlanilha } from './importer.js?v=20261117184830';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117184830';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117184830';
+import { ILUSTRA } from './ilustra.js?v=20261117184830';
 
 const app = document.getElementById('app');
 const S = {
@@ -653,7 +653,8 @@ function traduzErro(m) {
 /* ================================================================ mês */
 // Cores das categorias (mesma ordem das categorias do usuário)
 const PALETA = ['#2a9d8f', '#e76f51', '#457b9d', '#e9a23b', '#8d6cab', '#c05780', '#6a994e', '#5c7c8a'];
-const corCat = (cat) => PALETA[Math.max(0, cats().findIndex((c) => c.id === cat.id)) % PALETA.length];
+/** Cor de um cartão/conta nos gráficos e bolinhas: a do modelo escolhido (sempre visível no claro e no escuro); sem modelo, uma da paleta. */
+const corCat = (cat) => (cat?.estilo && ESTILOS[cat.estilo]?.cor) || PALETA[Math.max(0, cats().findIndex((c) => c.id === cat.id)) % PALETA.length];
 const anterior = (ano, mes) => (mes === 1 ? { ano: ano - 1, mes: 12 } : { ano, mes: mes - 1 });
 const seguinte = (ano, mes) => (mes === 12 ? { ano: ano + 1, mes: 1 } : { ano, mes: mes + 1 });
 
@@ -825,6 +826,29 @@ function renderMes(main, ano, mes) {
           : receita > 0 ? `<p class="hint pos">Despesas dentro do máximo de ${fmtPct(p.pct_max_gasto)} da receita.</p>` : ''}
       </section>
 
+      <section class="card">
+        ${tituloCard('Para onde foi o dinheiro', 'Gastos do mês em cada cartão e conta.')}
+        ${gastos.length ? `<div class="graf-rosca">
+          <div class="rosca"><canvas id="g-mes-rosca"></canvas><div class="rosca-centro"><span>Gastos</span><strong>${grande(l.totalDesp ?? 0)}</strong></div></div>
+          <ul class="leg-rosca">${[...gastos].sort((a, b) => b.valor - a.valor).map((x) => `<li><i style="background:${x.cor}"></i><span>${esc(x.nome)}</span>
+            <b>${fmtBRL(x.valor)}</b><small>${l.totalDesp ? Math.round((x.valor / l.totalDesp) * 100) : 0}%</small></li>`).join('')}</ul>
+        </div>` : '<p class="sub">Nenhum gasto lançado neste mês.</p>'}
+      </section>
+
+      <section class="card">
+        ${tituloCard(`${ano} até agora`, `${st.mesesComDados} ${st.mesesComDados === 1 ? 'mês lançado' : 'meses lançados'} no ano.`, 'calendario')}
+        <dl class="lista">
+          <div><dt>Receita no ano</dt><dd class="pos">${fmtBRL(st.receitaTotal)}</dd></div>
+          <div><dt>Despesas no ano</dt><dd>${fmtBRL(st.gastoTotal)}</dd></div>
+          <div class="destaque"><dt>Sobra acumulada</dt><dd class="${cls(st.saldoTotal)}">${fmtBRL(st.saldoTotal)}</dd></div>
+          <div><dt>Investido no ano</dt><dd>${fmtBRL(st.totalInvestido)}</dd></div>
+          <div><dt>Meses no vermelho</dt><dd class="${st.mesesNegativos ? 'neg' : 'pos'}">${st.mesesNegativos}</dd></div>
+        </dl>
+        ${st.reservaEsperada > 0 && st.ultimoSaldo !== null ? `
+          <p class="sub">Reserva de emergência: ${fmtBRL(st.ultimoSaldo)} de ${fmtBRL(st.reservaEsperada)} (${p.meses_reserva}× a receita média)</p>
+          <div class="progresso" role="progressbar" aria-valuenow="${Math.round(Math.min(100, (st.ultimoSaldo / st.reservaEsperada) * 100))}" aria-valuemin="0" aria-valuemax="100"><span style="width:${Math.max(0, Math.min(100, (st.ultimoSaldo / st.reservaEsperada) * 100))}%"></span></div>` : ''}
+      </section>
+
       ${(() => {
         // Gastos por categoria de gasto + pessoal × empresa (vem dos lançamentos) — só no modo Controle
         if (!ehControle()) return '';
@@ -884,6 +908,14 @@ function renderMes(main, ano, mes) {
     ult6.push(linhaMes(d.getFullYear(), d.getMonth() + 1, map, c));
   }
   grafico(main.querySelector('#g-mes'), ult6);
+  const rosca = main.querySelector('#g-mes-rosca');
+  if (rosca && window.Chart) {
+    S.charts.push(new Chart(rosca, {
+      type: 'doughnut',
+      data: { labels: gastos.map((x) => x.nome), datasets: [{ data: gastos.map((x) => x.valor), backgroundColor: gastos.map((x) => x.cor), borderWidth: 2, borderColor: cssVar('--surface'), hoverOffset: 4 }] },
+      options: { responsive: true, maintainAspectRatio: false, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${fmtBRL(c.parsed)}` } } } },
+    }));
+  }
 }
 
 /* ===================================================== lançamentos */
@@ -1945,21 +1977,21 @@ function abrirConta(cat) {
 // Cores dos cartões desenhados (nomes genéricos; o nome do banco é escrito pelo usuário)
 const ESTILOS = {
   // Modelos parecidos com cartões de verdade (desenhados, sem logotipo; o nome vem do campo "Banco")
-  letreiro: { nome: 'Modelo: preto com o nome grande', bg: 'linear-gradient(135deg,#18212a,#11181f)', tx: '#ffffff', modelo: true, chip: 'prata' },
-  metal: { nome: 'Modelo: preto metal escovado', bg: 'repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px),linear-gradient(135deg,#53575d,#2e3034 50%,#1c1e21)', tx: '#f1f5f9', modelo: true, chip: 'prata' },
-  'vermelho-liso': { nome: 'Modelo: vermelho liso', bg: 'linear-gradient(135deg,#ec3a2f,#d8211a)', tx: '#ffffff', modelo: true, chip: 'prata' },
-  'dourado-escamas': { nome: 'Modelo: dourado com escamas', bg: 'radial-gradient(circle at 50% 100%,transparent 8px,rgba(255,255,255,.22) 9px,transparent 10.5px) 0 0/18px 11px,linear-gradient(135deg,#dcb873,#bf9248 55%,#a97c35)', tx: '#ffffff', modelo: true, chip: 'prata' },
-  preto: { nome: 'Preto', bg: 'linear-gradient(135deg,#3a3f47 0%,#16181c 55%,#0b0c0e 100%)', tx: '#f8fafc' },
-  grafite: { nome: 'Grafite', bg: 'linear-gradient(135deg,#64748b,#334155)', tx: '#f8fafc' },
-  azul: { nome: 'Azul', bg: 'linear-gradient(135deg,#38bdf8,#0284c7 60%,#075985)', tx: '#ffffff' },
-  marinho: { nome: 'Azul-marinho', bg: 'linear-gradient(135deg,#1e40af,#172554)', tx: '#f8fafc' },
-  roxo: { nome: 'Roxo', bg: 'linear-gradient(135deg,#a855f7,#7e22ce 60%,#581c87)', tx: '#ffffff' },
-  vermelho: { nome: 'Vermelho', bg: 'linear-gradient(135deg,#f43f5e,#be123c 60%,#881337)', tx: '#ffffff' },
-  laranja: { nome: 'Laranja', bg: 'linear-gradient(135deg,#fb923c,#ea580c 60%,#9a3412)', tx: '#ffffff' },
-  amarelo: { nome: 'Amarelo', bg: 'linear-gradient(135deg,#fde047,#facc15 55%,#eab308)', tx: '#1f2937' },
-  verde: { nome: 'Verde', bg: 'linear-gradient(135deg,#34d399,#059669 60%,#065f46)', tx: '#ffffff' },
-  dourado: { nome: 'Dourado', bg: 'linear-gradient(135deg,#fde68a,#d97706 70%,#92400e)', tx: '#1f2937' },
-  prata: { nome: 'Prata', bg: 'linear-gradient(135deg,#f1f5f9,#cbd5e1 55%,#94a3b8)', tx: '#1e293b' },
+  letreiro: { nome: 'Modelo: preto com o nome grande', bg: 'linear-gradient(135deg,#18212a,#11181f)', tx: '#ffffff', modelo: true, chip: 'prata', cor: '#38bdf8' },
+  metal: { nome: 'Modelo: preto metal escovado', bg: 'repeating-linear-gradient(0deg,rgba(255,255,255,.035) 0 1px,transparent 1px 3px),linear-gradient(135deg,#53575d,#2e3034 50%,#1c1e21)', tx: '#f1f5f9', modelo: true, chip: 'prata', cor: '#a1a8b3' },
+  'vermelho-liso': { nome: 'Modelo: vermelho liso', bg: 'linear-gradient(135deg,#ec3a2f,#d8211a)', tx: '#ffffff', modelo: true, chip: 'prata', cor: '#ef4444' },
+  'dourado-escamas': { nome: 'Modelo: dourado com escamas', bg: 'radial-gradient(circle at 50% 100%,transparent 8px,rgba(255,255,255,.22) 9px,transparent 10.5px) 0 0/18px 11px,linear-gradient(135deg,#dcb873,#bf9248 55%,#a97c35)', tx: '#ffffff', modelo: true, chip: 'prata', cor: '#d4a24c' },
+  preto: { nome: 'Preto', bg: 'linear-gradient(135deg,#3a3f47 0%,#16181c 55%,#0b0c0e 100%)', tx: '#f8fafc', cor: '#7c8696' },
+  grafite: { nome: 'Grafite', bg: 'linear-gradient(135deg,#64748b,#334155)', tx: '#f8fafc', cor: '#94a3b8' },
+  azul: { nome: 'Azul', bg: 'linear-gradient(135deg,#38bdf8,#0284c7 60%,#075985)', tx: '#ffffff', cor: '#0ea5e9' },
+  marinho: { nome: 'Azul-marinho', bg: 'linear-gradient(135deg,#1e40af,#172554)', tx: '#f8fafc', cor: '#4f6bed' },
+  roxo: { nome: 'Roxo', bg: 'linear-gradient(135deg,#a855f7,#7e22ce 60%,#581c87)', tx: '#ffffff', cor: '#a855f7' },
+  vermelho: { nome: 'Vermelho', bg: 'linear-gradient(135deg,#f43f5e,#be123c 60%,#881337)', tx: '#ffffff', cor: '#f43f5e' },
+  laranja: { nome: 'Laranja', bg: 'linear-gradient(135deg,#fb923c,#ea580c 60%,#9a3412)', tx: '#ffffff', cor: '#f97316' },
+  amarelo: { nome: 'Amarelo', bg: 'linear-gradient(135deg,#fde047,#facc15 55%,#eab308)', tx: '#1f2937', cor: '#eab308' },
+  verde: { nome: 'Verde', bg: 'linear-gradient(135deg,#34d399,#059669 60%,#065f46)', tx: '#ffffff', cor: '#10b981' },
+  dourado: { nome: 'Dourado', bg: 'linear-gradient(135deg,#fde68a,#d97706 70%,#92400e)', tx: '#1f2937', cor: '#d97706' },
+  prata: { nome: 'Prata', bg: 'linear-gradient(135deg,#f1f5f9,#cbd5e1 55%,#94a3b8)', tx: '#1e293b', cor: '#a8b3c2' },
 };
 const ORDEM_ESTILOS_CREDITO = ['preto', 'azul', 'roxo', 'vermelho', 'laranja', 'verde', 'marinho', 'dourado'];
 /** Cor do cartão: a escolhida em Ajustes, ou uma padrão pela ordem. */
@@ -2222,8 +2254,7 @@ function renderCartoes(main, ano, mes) {
       const x = linhaMes(d.getFullYear(), d.getMonth() + 1, map, todas);
       meses12.push({ rotulo: `${MESES_CURTO[d.getMonth()]}/${String(d.getFullYear()).slice(2)}`, v: valor(sel, d.getFullYear(), d.getMonth() + 1, x) });
     }
-    const cor = { preto: '#334155', grafite: '#64748b', prata: '#94a3b8', amarelo: '#eab308', dourado: '#d97706' }[estiloDe(sel)]
-      || (ESTILOS[estiloDe(sel)].bg.match(/#[0-9a-f]{6}/gi) || ['#0d9488'])[1];
+    const cor = corCat(sel);
     S.charts.push(new Chart(canvas, {
       type: 'bar',
       data: { labels: meses12.map((x) => x.rotulo), datasets: [{ label: sel.banco || sel.nome, data: meses12.map((x) => x.v), backgroundColor: meses12.map((_, i) => (i === 11 ? cor : cor + '88')), borderRadius: 6, maxBarThickness: 34 }] },
@@ -2494,7 +2525,7 @@ function renderGraficos(main, ano, mes) {
     });
   }
 
-  const corConta = (c) => { const e = ESTILOS[estiloDe(c)]; return (e.bg.match(/#[0-9a-f]{6}/gi) || ['#0d9488'])[1] || e.bg.match(/#[0-9a-f]{6}/i)[0]; };
+  const corConta = (c) => corCat(c);
   novo('g-contas', {
     type: 'bar',
     data: { labels: porConta.map((x) => x.c.banco ? `${x.c.banco} · ${x.c.nome}` : x.c.nome), datasets: [{ data: porConta.map((x) => x.v), backgroundColor: porConta.map((x) => corConta(x.c)), borderRadius: 4, borderSkipped: 'start', maxBarThickness: 22 }] },
@@ -3048,16 +3079,6 @@ function renderAnoResumo(main, ano) {
       </section>
 
       <section class="card">
-        ${tituloCard('Saldo financeiro', 'Como o dinheiro guardado evoluiu no ano.', 'cofre')}
-        <dl class="lista">
-          <div><dt>Saldo no início do ano</dt><dd>${fmtBRL(st.saldoInicio)}</dd></div>
-          <div><dt>Último saldo informado</dt><dd>${fmtBRL(st.ultimoSaldo)}</dd></div>
-          <div class="destaque"><dt>Resultado acumulado</dt><dd class="${cls(st.resultadoAcumulado)}">${fmtBRL(st.resultadoAcumulado)}</dd></div>
-          <div><dt>Média do resultado por mês</dt><dd class="${cls(st.mediaResultado)}">${fmtBRL(st.mediaResultado)}</dd></div>
-        </dl>
-      </section>
-
-      <section class="card">
         ${tituloCard('Metas', 'A média do ano comparada às metas.', 'alvo')}
         <dl class="lista">
           <div><dt>Máximo para gastar por mês (${fmtPct(p.pct_max_gasto)})</dt><dd>${fmtBRL(maxGastar)}</dd></div>
@@ -3067,9 +3088,18 @@ function renderAnoResumo(main, ano) {
         </dl>
       </section>
 
-      <section class="card grafico">
-        ${tituloCard('Evolução do saldo', 'Saldo no dia 1º de cada mês.')}
-        <div class="canvas-box pequeno"><canvas id="g-saldo"></canvas></div>
+      <!-- Saldo financeiro + evolução no mesmo quadro, ocupando duas colunas (o gráfico precisa de largura) -->
+      <section class="card grafico span-2">
+        ${tituloCard('Saldo financeiro', 'Como o dinheiro guardado evoluiu no ano (saldo no dia 1º de cada mês).', 'cofre')}
+        <div class="saldo-evolucao">
+          <dl class="lista">
+            <div><dt>Saldo no início do ano</dt><dd>${fmtBRL(st.saldoInicio)}</dd></div>
+            <div><dt>Último saldo informado</dt><dd>${fmtBRL(st.ultimoSaldo)}</dd></div>
+            <div class="destaque"><dt>Resultado acumulado</dt><dd class="${cls(st.resultadoAcumulado)}">${fmtBRL(st.resultadoAcumulado)}</dd></div>
+            <div><dt>Média do resultado por mês</dt><dd class="${cls(st.mediaResultado)}">${fmtBRL(st.mediaResultado)}</dd></div>
+          </dl>
+          <div class="canvas-box pequeno"><canvas id="g-saldo"></canvas></div>
+        </div>
       </section>
 
       ${temAnt ? `

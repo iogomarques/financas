@@ -1059,3 +1059,23 @@ h3.sub-secao { font-size: .78rem; text-transform: uppercase; letter-spacing: .05
 .cartao-vis.modelo-dourado-escamas .cv-tipo { background: rgba(255, 255, 255, .25); }
 /* Escolha do modelo em Ajustes: amostras maiores */
 .cores.modelos .cor-op { width: 54px; height: 34px; }
+
+/* ===================== Aproveitamento de espaço: cards da mesma linha com a mesma altura (sem buracos) */
+.mes-grid, .ajuda-grid { align-items: stretch; }
+.mes-grid > .card, .ajuda-grid > .card { display: flex; flex-direction: column; }
+.mes-grid > .card > .linha-total { margin-top: auto; } /* total sempre no pé do card */
+.mes-grid .span-2 { grid-column: span 2; }
+.saldo-evolucao { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 1.25rem; align-items: center; flex: 1; }
+.saldo-evolucao .canvas-box { height: 100%; min-height: 220px; }
+/* Planilha / Todos os anos: a coluna da direita acompanha a altura do quadro de informações */
+.planilha { align-items: stretch; }
+.planilha > .info { align-self: start; }
+.planilha .coluna { display: flex; flex-direction: column; }
+.planilha .coluna > :last-child { flex: 1; }
+@media (max-width: 1200px) {
+  .mes-grid .span-2 { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .mes-grid .span-2 { grid-column: auto; }
+  .saldo-evolucao { grid-template-columns: minmax(0, 1fr); }
+}
