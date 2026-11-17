@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117192732';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117192732';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117192732';
-import { lerPlanilha } from './importer.js?v=20261117192732';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117192732';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117192732';
-import { ILUSTRA } from './ilustra.js?v=20261117192732';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117193028';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117193028';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117193028';
+import { lerPlanilha } from './importer.js?v=20261117193028';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117193028';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117193028';
+import { ILUSTRA } from './ilustra.js?v=20261117193028';
 
 const app = document.getElementById('app');
 const S = {

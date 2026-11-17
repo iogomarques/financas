@@ -1258,3 +1258,22 @@ h2 { font-size: 1rem; font-weight: 650; letter-spacing: -.01em; }
 .parcela-campos input { width: 5.5rem; }
 .parcela-campos span { color: var(--muted); }
 .tabela-leve td small.tag { display: table; margin: .2rem 0 0 auto; }
+
+/* ---------- marca no menu lateral: logo grande e nome em destaque (computador) */
+@media (min-width: 901px) {
+  .lateral .marca {
+    position: relative; flex-direction: column; align-items: center; text-align: center;
+    gap: .3rem; padding: .35rem 0 .9rem; margin: 0 .2rem; border-bottom: 1px solid var(--border);
+  }
+  .lateral .marca img { width: 88px; height: 88px; filter: drop-shadow(0 6px 14px rgba(0, 0, 0, .28)); }
+  .lateral .marca > span { font-size: 1.22rem; font-weight: 800; letter-spacing: -.02em; line-height: 1.15; justify-items: center; }
+  .lateral .marca small { font-size: .78rem; font-weight: 600; margin-top: .15rem; }
+  .lateral .menu-alternar { display: grid; position: absolute; top: 0; left: 0; }
+  /* menu recolhido: só o botão, e a logo pequena logo abaixo */
+  .layout.compacto .lateral .marca { padding: 0 0 .6rem; gap: .5rem; }
+  .layout.compacto .lateral .marca img { display: block; width: 40px; height: 40px; filter: none; }
+  .layout.compacto .lateral .menu-alternar { position: static; }
+}
+/* marca no topo do celular: logo maior */
+.topo .marca img { width: 50px; height: 50px; }
+.topo .marca > span { font-size: 1.12rem; font-weight: 800; }
