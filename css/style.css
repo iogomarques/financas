@@ -1017,3 +1017,23 @@ h3.sub-secao { font-size: .78rem; text-transform: uppercase; letter-spacing: .05
   .subcat { grid-template-columns: auto minmax(0, 1fr) auto; }
   .subcat .cat-barra { display: none; }
 }
+
+/* ===================== Gráficos */
+.graf-duplo { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1.25rem; }
+.graf-rosca { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; align-items: center; }
+.graf-rosca .rosca { width: 100%; max-width: 230px; margin: 0 auto; }
+.graf-rosca > * { min-width: 0; }
+.leg-rosca { list-style: none; margin: 0; padding: 0; display: grid; gap: .35rem; }
+.leg-rosca li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto 2.6rem; gap: .5rem; align-items: center; font-size: .86rem; }
+.leg-rosca i { width: 10px; height: 10px; border-radius: 3px; }
+.leg-rosca span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.leg-rosca b { font-weight: 600; white-space: nowrap; }
+.leg-rosca small { color: var(--muted); text-align: right; }
+.ver-numeros { margin-top: .75rem; }
+.ver-numeros summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .88rem; }
+.ver-numeros .tabela-wrap { margin-top: .5rem; }
+@media (max-width: 720px) {
+  .graf-duplo { grid-template-columns: minmax(0, 1fr); }
+  .graf-rosca { grid-template-columns: minmax(0, 1fr); }
+  .graf-rosca .rosca { max-width: 220px; margin: 0 auto; }
+}

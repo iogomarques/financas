@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117083546';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117083546';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117083546';
-import { lerPlanilha } from './importer.js?v=20261117083546';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117083546';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117083546';
-import { ILUSTRA } from './ilustra.js?v=20261117083546';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117084047';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117084047';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117084047';
+import { lerPlanilha } from './importer.js?v=20261117084047';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117084047';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117084047';
+import { ILUSTRA } from './ilustra.js?v=20261117084047';
 
 const app = document.getElementById('app');
 const S = {
@@ -367,7 +367,7 @@ function rota() {
   if (h[0] === 'ajuda') return { view: 'ajuda' };
   if (h[0] === 'geral') return { view: 'geral' };
   const ano = Number(h[1]), mes = Number(h[2]);
-  if (['lancamentos', 'classificar', 'cartoes', 'contas', 'calendario'].includes(h[0])) {
+  if (['lancamentos', 'classificar', 'cartoes', 'contas', 'calendario', 'graficos'].includes(h[0])) {
     const aba = h[0] === 'lancamentos' ? h[3] || 'despesas' : undefined; // aba de Transações
     if (ano && mes >= 1 && mes <= 12) return { view: h[0], ano, mes, aba };
     return { view: h[0], ...mesPadrao(), aba };
@@ -467,6 +467,7 @@ function render() {
   else if (r.view === 'cartoes') renderCartoes(main, r.ano, r.mes);
   else if (r.view === 'lancamentos') renderLancamentos(main, r.ano, r.mes, r.aba);
   else if (r.view === 'calendario') renderCalendario(main, r.ano, r.mes);
+  else if (r.view === 'graficos') renderGraficos(main, r.ano, r.mes);
   else if (r.view === 'classificar') renderClassificar(main, r.ano, r.mes);
   else if (r.view === 'categorias') renderCategorias(main, r.ano, r.mes);
   else if (r.view === 'geral') renderGeral(main);
@@ -498,6 +499,7 @@ function shell(r) {
         ${item(`#/calendario${sufixoMes}`, 'calendario', 'Calendário', ICON.calendario)}
         ${item(`#/categorias${sufixoMes}`, 'categorias', 'Categorias', ICON.categorias, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Análise</span>
+        ${item(`#/graficos${sufixoMes}`, 'graficos', 'Gráficos', ICON.grafico, '', 'so-desktop')}
         ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano, '', 'so-desktop')}
         ${item('#/geral', 'geral', 'Todos os anos', ICON.geral, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Configurar</span>
@@ -505,7 +507,8 @@ function shell(r) {
         ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda, '', 'so-desktop')}`
     : `<span class="nav-titulo">Menu</span>
         ${item(`#/mes${sufixoMes}`, 'mes', 'Visão do mês', ICON.mes)}
-        ${item(`#/cartoes${sufixoMes}`, 'cartoes', 'Cartões', ICON.cartao)}
+${item(`#/cartoes${sufixoMes}`, 'cartoes', 'Cartões', ICON.cartao)}
+        ${item(`#/graficos${sufixoMes}`, 'graficos', 'Gráficos', ICON.grafico)}
         ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano)}
         ${item('#/geral', 'geral', 'Todos os anos', ICON.geral)}
         <span class="nav-titulo nav-sep">Configurar</span>
@@ -1751,7 +1754,7 @@ function renderResumo(main, ano, mes) {
 
   main.innerHTML = `
     ${cabecalhoMes(ano, mes, '#/mes', `
-      <a class="btn" href="#/lancamentos/${ano}/${mes}">${ICON.lista}<span>Transações</span></a>
+      <a class="btn" href="#/graficos/${ano}/${mes}">${ICON.grafico}<span>Gráficos</span></a>
       <button class="btn primario" data-a="importar-mes">${ICON.upload}<span>Importar extrato</span></button>`)}
 
     ${pend || nConf ? `<div class="faixa-aviso">${ICON.classificar}
@@ -2217,6 +2220,204 @@ function renderCartoes(main, ano, mes) {
         scales: { x: { grid: { display: false }, ticks: { color: cssVar('--muted') } }, y: { grid: { color: cssVar('--border') }, ticks: { color: cssVar('--muted'), callback: (v) => v.toLocaleString('pt-BR') } } },
       },
     }));
+  }
+}
+
+/* =========================================================== gráficos */
+const PERIODOS_GRAF = { mes: 'Mês', '12m': '12 meses', ano: 'Ano' };
+const COR_PESSOAL = '#14b8a6', COR_EMPRESA = '#6366f1';
+
+/** Meses do período escolhido: o mês, os 12 até ele, ou o ano inteiro. */
+function mesesDoPeriodo(ano, mes, per) {
+  if (per === 'mes') return [{ ano, mes }];
+  if (per === 'ano') return Array.from({ length: 12 }, (_, i) => ({ ano, mes: i + 1 }));
+  return Array.from({ length: 12 }, (_, i) => { const d = new Date(ano, mes - 12 + i, 1); return { ano: d.getFullYear(), mes: d.getMonth() + 1 }; });
+}
+const rotuloMesCurto = (p) => `${MESES_CURTO[p.mes - 1]}/${String(p.ano).slice(2)}`;
+
+/** Agrupa valores por categoria principal; acima de 8 fatias, o resto vira "Outras". */
+function fatiasPorCategoria(lancs) {
+  const m = new Map();
+  for (const l of lancs) {
+    const c = raizClasse(classePorId(l.classe_id));
+    const k = c?.id || '';
+    const x = m.get(k) || { nome: c?.nome || 'Sem categoria', cor: c?.cor || '#cbd5e1', v: 0 };
+    x.v += l.valor;
+    m.set(k, x);
+  }
+  const lista = [...m.values()].sort((a, b) => b.v - a.v);
+  if (lista.length <= 8) return lista;
+  const resto = lista.slice(7);
+  return [...lista.slice(0, 7), { nome: `Outras (${resto.length})`, cor: '#94a3b8', v: resto.reduce((s, x) => s + x.v, 0) }];
+}
+
+function renderGraficos(main, ano, mes) {
+  const per = PERIODOS_GRAF[S.grafPer] ? S.grafPer : '12m';
+  const controle = ehControle();
+  const periodo = mesesDoPeriodo(ano, mes, per);
+  const meses12 = mesesDoPeriodo(ano, mes, per === 'ano' ? 'ano' : '12m'); // gráficos de evolução: 12 meses ou o ano
+  const chaves = new Set(periodo.map((p) => `${p.ano}-${pad2(p.mes)}`));
+  const lancPer = S.data.lancamentos.filter((l) => chaves.has(String(l.data).slice(0, 7)));
+  const map = indexMeses(efetivos());
+  const todas = cats();
+  // Receita e despesa de um mês (modo controle: pelas transações; organização: pelos totais do mês)
+  const resMes = (p) => {
+    if (controle) { const t = totaisControle(p.ano, p.mes); return { r: t.receitas, d: t.despesas }; }
+    const l = linhaMes(p.ano, p.mes, map, todas);
+    return { r: l.receita ?? 0, d: l.totalDesp ?? 0 };
+  };
+  const evol = meses12.map((p) => ({ ...p, ...resMes(p) }));
+  const totR = periodo.reduce((s, p) => s + resMes(p).r, 0);
+  const totD = periodo.reduce((s, p) => s + resMes(p).d, 0);
+  const nomePer = per === 'mes' ? MESES[mes - 1].toLowerCase() : per === 'ano' ? String(ano) : `${rotuloMesCurto(periodo[0])} a ${rotuloMesCurto(periodo[11])}`;
+
+  const fatiasD = controle ? fatiasPorCategoria(lancPer.filter((l) => l.destino === 'despesa')) : [];
+  const fatiasR = controle ? fatiasPorCategoria(lancPer.filter((l) => l.destino === 'receita' || l.destino === 'rendimento')) : [];
+  // Gastos por conta/cartão no período
+  const porConta = todas.map((c) => ({ c, v: periodo.reduce((s, p) => s + (linhaMes(p.ano, p.mes, map, todas).desp[c.id] ?? 0), 0) }))
+    .filter((x) => x.v > 0).sort((a, b) => b.v - a.v);
+  // Saldo nas contas no fim de cada mês (só contas com saldo inicial, e só depois da data dele)
+  const contasSaldo = controle ? contasBancarias().filter((c) => c.saldo_inicial !== null && c.saldo_inicial !== undefined) : [];
+  const temPesEmp = controle && S.data.lancamentos.some((l) => l.destino === 'despesa');
+
+  const legendaRosca = (fatias, total) => `<ul class="leg-rosca">${fatias.map((f) => `<li><i style="background:${f.cor}"></i><span>${esc(f.nome)}</span>
+      <b>${fmtBRL(f.v)}</b><small>${total ? Math.round((f.v / total) * 100) : 0}%</small></li>`).join('')}</ul>`;
+  const blocoRosca = (id, titulo, sub, fatias, vazio) => {
+    const total = fatias.reduce((s, f) => s + f.v, 0);
+    return `<section class="card">
+      ${tituloCard(titulo, sub)}
+      ${fatias.length ? `<div class="graf-rosca"><div class="rosca"><canvas id="${id}"></canvas><div class="rosca-centro"><span>Total</span><strong>${grande(total)}</strong></div></div>
+        ${legendaRosca(fatias, total)}</div>` : `<p class="sub">${vazio}</p>`}
+    </section>`;
+  };
+
+  main.innerHTML = `
+    ${cabecalhoMes(ano, mes, '#/graficos', `<div class="seg" role="group" aria-label="Período">${Object.entries(PERIODOS_GRAF).map(([k, t]) =>
+      `<button data-per="${k}" class="${per === k ? 'ativo' : ''}" aria-pressed="${per === k}">${t}</button>`).join('')}</div>`)}
+
+    <section class="mini-kpis">
+      <div class="card"><span>Receitas · ${esc(nomePer)}</span><strong class="pos">${fmtBRL(totR)}</strong></div>
+      <div class="card"><span>Despesas · ${esc(nomePer)}</span><strong class="neg">${fmtBRL(totD)}</strong></div>
+      <div class="card"><span>Resultado</span><strong class="${cls(totR - totD)}">${fmtBRL(totR - totD)}</strong></div>
+      <div class="card"><span>Gasto / receita</span><strong>${totR ? fmtPct(totD / totR) : '—'}</strong></div>
+    </section>
+
+    <section class="card grafico">
+      ${tituloCard('Receitas e despesas', `${per === 'ano' ? `Cada mês de ${ano}` : 'Os últimos 12 meses'}. Passe o mouse (ou toque) numa barra para ver os valores.`, 'grafico')}
+      <div class="canvas-box"><canvas id="g-evol"></canvas></div>
+      <details class="ver-numeros"><summary>Ver os números</summary>
+        <div class="tabela-wrap"><table class="tabela">
+          <thead><tr><th>Mês</th><th>Receitas</th><th>Despesas</th><th>Resultado</th></tr></thead>
+          <tbody>${evol.map((x) => `<tr><th>${rotuloMesCurto(x)}</th><td>${fmtNum(x.r)}</td><td>${fmtNum(x.d)}</td><td class="${cls(x.r - x.d)}">${fmtNum(x.r - x.d)}</td></tr>`).join('')}</tbody>
+        </table></div>
+      </details>
+    </section>
+
+    ${controle ? `<div class="graf-duplo">
+      ${blocoRosca('g-desp', 'Despesas por categoria', `Para onde foi o dinheiro · ${esc(nomePer)}`, fatiasD, 'Nenhuma despesa no período.')}
+      ${blocoRosca('g-rec', 'Receitas por categoria', `De onde veio o dinheiro · ${esc(nomePer)}`, fatiasR, 'Nenhuma receita no período.')}
+    </div>` : ''}
+
+    <div class="graf-duplo">
+      ${temPesEmp ? `<section class="card grafico">
+        ${tituloCard('Pessoal e empresa', 'Despesas de cada mês, separadas pelo lado.')}
+        <div class="canvas-box"><canvas id="g-lado"></canvas></div>
+      </section>` : ''}
+      <section class="card grafico">
+        ${tituloCard('Gastos por conta e cartão', `De onde saiu o dinheiro · ${esc(nomePer)}`)}
+        ${porConta.length ? `<div class="canvas-box" style="height:${Math.max(160, porConta.length * 44 + 40)}px"><canvas id="g-contas"></canvas></div>` : '<p class="sub">Nenhum gasto no período.</p>'}
+      </section>
+    </div>
+
+    ${contasSaldo.length ? `<section class="card grafico">
+      ${tituloCard('Saldo nas contas', 'Quanto havia em cada conta no fim de cada mês (contas com saldo inicial informado).', 'cofre')}
+      <div class="canvas-box"><canvas id="g-saldo"></canvas></div>
+    </section>` : controle ? `<section class="card"><p class="sub">Para ver a evolução do saldo, informe o saldo inicial das contas na tela <a href="#/contas/${ano}/${mes}">Contas</a>.</p></section>` : ''}
+
+    ${!controle ? `<section class="card grafico">
+      ${tituloCard('Investimento por mês', 'Quanto foi guardado em cada mês.', 'cofrinho')}
+      <div class="canvas-box pequeno"><canvas id="g-invest"></canvas></div>
+    </section>` : ''}`;
+
+  main.querySelectorAll('[data-per]').forEach((b) => b.addEventListener('click', () => { S.grafPer = b.dataset.per; render(); }));
+  if (!window.Chart) return;
+
+  // Estilo comum: grade discreta, um só eixo, valores em reais no tooltip
+  const muted = cssVar('--muted'), borda = cssVar('--border'), sup = cssVar('--surface');
+  const eixoY = { grid: { color: borda }, border: { display: false }, ticks: { color: muted, callback: (v) => v.toLocaleString('pt-BR') } };
+  const eixoX = { grid: { display: false }, ticks: { color: muted } };
+  const legenda = { labels: { color: muted, boxWidth: 10, boxHeight: 10, usePointStyle: true, pointStyle: 'rectRounded' } };
+  const tip = { callbacks: { label: (c) => `${c.dataset.label ? c.dataset.label + ': ' : ''}${fmtBRL(c.parsed.y ?? c.parsed.x ?? c.parsed)}` } };
+  const barra = { borderRadius: 4, borderSkipped: 'start', maxBarThickness: 28, borderColor: sup, borderWidth: { left: 1, right: 1 } };
+  const novo = (id, cfg) => { const el = main.querySelector('#' + id); if (el) S.charts.push(new Chart(el, cfg)); };
+
+  novo('g-evol', {
+    type: 'bar',
+    data: {
+      labels: evol.map(rotuloMesCurto),
+      datasets: [
+        { label: 'Receitas', data: evol.map((x) => x.r), backgroundColor: cssVar('--c-receita'), ...barra },
+        { label: 'Despesas', data: evol.map((x) => x.d), backgroundColor: cssVar('--c-despesa'), ...barra },
+        { type: 'line', label: 'Resultado', data: evol.map((x) => x.r - x.d), borderColor: cssVar('--c-saldo'), backgroundColor: cssVar('--c-saldo'),
+          borderWidth: 2, pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: sup, tension: 0.3 },
+      ],
+    },
+    options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+      plugins: { legend: legenda, tooltip: tip }, scales: { x: eixoX, y: eixoY } },
+  });
+
+  const rosca = (id, fatias) => novo(id, {
+    type: 'doughnut',
+    data: { labels: fatias.map((f) => f.nome), datasets: [{ data: fatias.map((f) => f.v), backgroundColor: fatias.map((f) => f.cor), borderWidth: 2, borderColor: sup, hoverOffset: 4 }] },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '68%', plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${fmtBRL(c.parsed)}` } } } },
+  });
+  rosca('g-desp', fatiasD);
+  rosca('g-rec', fatiasR);
+
+  if (temPesEmp) {
+    const lado = (p, e) => S.data.lancamentos.filter((l) => l.destino === 'despesa' && String(l.data).startsWith(`${p.ano}-${pad2(p.mes)}`) && (e ? l.escopo === 'empresa' : l.escopo !== 'empresa')).reduce((s, l) => s + l.valor, 0);
+    novo('g-lado', {
+      type: 'bar',
+      data: {
+        labels: meses12.map(rotuloMesCurto),
+        datasets: [
+          { label: 'Pessoal', data: meses12.map((p) => lado(p, false)), backgroundColor: COR_PESSOAL, ...barra, borderWidth: { top: 2 }, borderSkipped: false, borderRadius: 4 },
+          { label: 'Empresa', data: meses12.map((p) => lado(p, true)), backgroundColor: COR_EMPRESA, ...barra, borderWidth: { top: 2 }, borderSkipped: false, borderRadius: 4 },
+        ],
+      },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: legenda, tooltip: tip }, scales: { x: { ...eixoX, stacked: true }, y: { ...eixoY, stacked: true } } },
+    });
+  }
+
+  const corConta = (c) => { const e = ESTILOS[estiloDe(c)]; return (e.bg.match(/#[0-9a-f]{6}/gi) || ['#0d9488'])[1] || e.bg.match(/#[0-9a-f]{6}/i)[0]; };
+  novo('g-contas', {
+    type: 'bar',
+    data: { labels: porConta.map((x) => x.c.banco ? `${x.c.banco} · ${x.c.nome}` : x.c.nome), datasets: [{ data: porConta.map((x) => x.v), backgroundColor: porConta.map((x) => corConta(x.c)), borderRadius: 4, borderSkipped: 'start', maxBarThickness: 22 }] },
+    options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmtBRL(c.parsed.x) } } },
+      scales: { x: { ...eixoY, grid: { color: borda } }, y: { grid: { display: false }, ticks: { color: muted } } } },
+  });
+
+  if (contasSaldo.length) {
+    const fimDe = (p) => isoFim(p.ano, p.mes);
+    const valorSaldo = (c, p) => (fimDe(p) < (c.saldo_desde || '0000-00-00') ? null : saldoConta(c, fimDe(p)));
+    const series = contasSaldo.map((c) => ({ label: c.banco ? `${c.banco} · ${c.nome}` : c.nome, data: meses12.map((p) => valorSaldo(c, p)),
+      borderColor: corConta(c), backgroundColor: corConta(c), borderWidth: 2, pointRadius: 3, pointHoverRadius: 6, tension: 0.25, spanGaps: false }));
+    novo('g-saldo', {
+      type: 'line',
+      data: { labels: meses12.map(rotuloMesCurto), datasets: series },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: legenda, tooltip: tip }, scales: { x: eixoX, y: eixoY } },
+    });
+  }
+
+  if (!controle) {
+    novo('g-invest', {
+      type: 'bar',
+      data: { labels: meses12.map(rotuloMesCurto), datasets: [{ label: 'Investimento', data: meses12.map((p) => linhaMes(p.ano, p.mes, map, todas).investimento ?? 0), backgroundColor: cssVar('--accent'), ...barra }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: tip }, scales: { x: eixoX, y: eixoY } },
+    });
   }
 }
 
@@ -3790,6 +3991,7 @@ const svg = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" 
 const ICON = {
   mes: svg('<rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M8.5 14.5l2.2 2.2 4.8-4.8"/>'),
   geral: svg('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'),
+  grafico: svg('<path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-6"/>'),
   ano: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>'),
   ajustes: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   mais: svg('<path d="M12 5v14M5 12h14"/>'),

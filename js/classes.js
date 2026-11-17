@@ -3,7 +3,7 @@
 // Separação pessoal × empresa é por LANÇAMENTO (não por conta): a mesma conta pode ter os dois.
 // Ordem para decidir o lado de um lançamento:
 //   1. lado escolhido na regra  →  2. lado padrão da categoria  →  3. o que já estava no lançamento
-import { normDesc } from './extrato.js?v=20261117083546';
+import { normDesc } from './extrato.js?v=20261117084047';
 
 /** Sugestões para começar: [nome, cor, lado padrão ('empresa' | 'pessoal' | null = depende)] */
 export const CLASSES_SUGERIDAS = [
