@@ -7,7 +7,7 @@
 //     categorias: [{id, perfil_id, nome, tipo: 'debito'|'credito', ordem, ativo}],
 //     meses: [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     prefs: { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261116134933';
+import { uid } from './util.js?v=20261117000336';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
@@ -25,6 +25,7 @@ export function normalizarDados(data) {
     perfis: Array.isArray(data.perfis) ? data.perfis : [],
     categorias: Array.isArray(data.categorias) ? data.categorias : [],
     meses: Array.isArray(data.meses) ? data.meses : [],
+    lancamentos: Array.isArray(data.lancamentos) ? data.lancamentos : [],
     prefs: data.prefs && typeof data.prefs === 'object' ? data.prefs : {},
   };
   if (!d.perfis.length && (d.categorias.length || d.meses.length)) {
@@ -111,6 +112,34 @@ function localStore() {
       write(db);
       return db.prefs[perfilId];
     },
+    async saveLancamento(l) {
+      const db = read();
+      if (!l.id) l = { ...l, id: uid() };
+      const i = db.lancamentos.findIndex((x) => x.id === l.id);
+      if (i >= 0) db.lancamentos[i] = l; else db.lancamentos.push(l);
+      write(db);
+      return l;
+    },
+    async deleteLancamento(id) {
+      const db = read();
+      db.lancamentos = db.lancamentos.filter((x) => x.id !== id);
+      write(db);
+    },
+    /** Insere vários; os que já existem (mesma chave) são ignorados. Devolve só os novos. */
+    async importarLancamentos(lista) {
+      const db = read();
+      const chaves = new Set(db.lancamentos.filter((x) => x.chave).map((x) => `${x.perfil_id}|${x.chave}`));
+      const novos = [];
+      for (const l of lista) {
+        if (l.chave && chaves.has(`${l.perfil_id}|${l.chave}`)) continue;
+        const n = { ...l, id: uid() };
+        db.lancamentos.push(n);
+        novos.push(n);
+        if (l.chave) chaves.add(`${l.perfil_id}|${l.chave}`);
+      }
+      write(db);
+      return novos;
+    },
     async replaceAll(data) {
       write(normalizarDados(data));
     },
@@ -131,6 +160,17 @@ async function supabaseStore(cfg) {
   const CAT_COLS = 'id, perfil_id, nome, tipo, ordem, ativo';
   const MES_COLS = 'perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao';
   const PREF_COLS = 'perfil_id, pct_investir, meses_reserva, pct_max_gasto';
+  const LANC_COLS = 'id, perfil_id, data, descricao, valor, destino, categoria_id, escopo, origem, conta, chave';
+  const limpaLanc = (l) => {
+    const row = {
+      perfil_id: l.perfil_id, data: l.data, descricao: String(l.descricao).slice(0, 200), valor: l.valor,
+      destino: l.destino, categoria_id: l.destino === 'despesa' ? l.categoria_id : null,
+      escopo: l.escopo || 'pessoal', origem: l.origem || 'manual', conta: l.conta || null, chave: l.chave || null,
+    };
+    if (l.id) row.id = l.id;
+    return row;
+  };
+  const numLanc = (l) => ({ ...l, valor: Number(l.valor) });
   const limpaMes = (r) => ({
     perfil_id: r.perfil_id,
     ano: r.ano, mes: r.mes,
@@ -191,7 +231,32 @@ async function supabaseStore(cfg) {
         const { perfil_id: id, ...resto } = p;
         prefsPorPerfil[id] = { ...PREFS_PADRAO, ...resto };
       }
-      return { perfis: check(perfis), categorias: check(cats), meses: check(meses), prefs: prefsPorPerfil };
+      // Lançamentos podem passar de 1000 linhas (limite por consulta): busca em páginas.
+      const lancamentos = [];
+      for (let de = 0; ; de += 1000) {
+        const pagina = check(await sb.from('fin_lancamentos').select(LANC_COLS).order('data').order('id').range(de, de + 999));
+        lancamentos.push(...pagina.map(numLanc));
+        if (pagina.length < 1000) break;
+      }
+      return { perfis: check(perfis), categorias: check(cats), meses: check(meses), lancamentos, prefs: prefsPorPerfil };
+    },
+    async saveLancamento(l) {
+      return numLanc(check(await sb.from('fin_lancamentos').upsert(limpaLanc(l)).select(LANC_COLS).single()));
+    },
+    async deleteLancamento(id) {
+      check(await sb.from('fin_lancamentos').delete().eq('id', id));
+    },
+    /** Insere vários; os que já existem (mesma chave) são ignorados pelo banco. Devolve só os novos. */
+    async importarLancamentos(lista) {
+      const novos = [];
+      for (let i = 0; i < lista.length; i += 500) {
+        const parte = lista.slice(i, i + 500).map(limpaLanc);
+        const r = check(await sb.from('fin_lancamentos')
+          .upsert(parte, { onConflict: 'user_id,perfil_id,chave', ignoreDuplicates: true })
+          .select(LANC_COLS));
+        novos.push(...r.map(numLanc));
+      }
+      return novos;
     },
     async savePerfil(p) {
       return check(await sb.from('fin_perfis').upsert(limpaPerfil(p)).select(PERFIL_COLS).single());
@@ -226,6 +291,9 @@ async function supabaseStore(cfg) {
       if (d.perfis.length) check(await sb.from('fin_perfis').insert(d.perfis.map(limpaPerfil)));
       if (d.categorias.length) check(await sb.from('fin_categorias').insert(d.categorias.map(limpaCat)));
       if (d.meses.length) check(await sb.from('fin_meses').insert(d.meses.map(limpaMes)));
+      for (let i = 0; i < d.lancamentos.length; i += 500) {
+        check(await sb.from('fin_lancamentos').insert(d.lancamentos.slice(i, i + 500).map(limpaLanc)));
+      }
       for (const [perfilId, p] of Object.entries(d.prefs)) await this.savePrefs(perfilId, { ...PREFS_PADRAO, ...p });
     },
   };

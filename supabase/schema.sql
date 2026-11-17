@@ -153,3 +153,37 @@ create table if not exists public.fin_perfis (
 -- FK (perfil_id, user_id) -> fin_perfis on delete cascade, e chaves:
 --   fin_meses: (user_id, perfil_id, ano, mes) · fin_preferencias: (user_id, perfil_id)
 -- Todas as policies fin_* passaram a usar: (select auth.uid()) = user_id and (select public.fin_acesso())
+
+-- ===================================================================
+-- Lançamentos individuais (aplicado em 17/11/2026)
+-- O total de cada campo do mês (receita, rendimento, investimento, cada categoria)
+-- passa a ser a soma dos lançamentos daquele campo quando houver algum.
+-- A chave impede importar a mesma movimentação do banco duas vezes.
+-- ===================================================================
+create table if not exists public.fin_lancamentos (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null default auth.uid() references auth.users (id) on delete restrict,
+  perfil_id    uuid not null,
+  data         date not null,
+  descricao    text not null check (char_length(descricao) between 1 and 200),
+  valor        numeric(14, 2) not null check (valor > 0),
+  destino      text not null check (destino in ('despesa', 'receita', 'rendimento', 'investimento')),
+  categoria_id uuid references public.fin_categorias (id) on delete no action,
+  escopo       text not null default 'pessoal' check (escopo in ('pessoal', 'empresa')),
+  origem       text not null default 'manual' check (origem in ('manual', 'extrato')),
+  conta        text,
+  chave        text,
+  created_at   timestamptz not null default now(),
+  constraint fin_lancamentos_perfil_fkey foreign key (perfil_id, user_id)
+    references public.fin_perfis (id, user_id) on delete cascade,
+  constraint fin_lancamentos_categoria_ok check ((destino = 'despesa') = (categoria_id is not null)),
+  constraint fin_lancamentos_sem_repetir unique (user_id, perfil_id, chave)
+);
+create index if not exists fin_lancamentos_data_idx on public.fin_lancamentos (user_id, perfil_id, data);
+create index if not exists fin_lancamentos_perfil_idx on public.fin_lancamentos (perfil_id, user_id);
+create index if not exists fin_lancamentos_categoria_idx on public.fin_lancamentos (categoria_id);
+alter table public.fin_lancamentos enable row level security;
+revoke all on public.fin_lancamentos from anon;
+create policy "fin lancamentos do dono" on public.fin_lancamentos for all to authenticated
+  using ((select auth.uid()) = user_id and (select public.fin_acesso()))
+  with check ((select auth.uid()) = user_id and (select public.fin_acesso()));

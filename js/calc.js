@@ -104,6 +104,40 @@ export function estatisticas(rows, cats, prefs) {
   };
 }
 
+/**
+ * Junta os lançamentos individuais aos meses.
+ * Para cada campo (receita, rendimento, investimento, cada categoria) que tiver lançamentos
+ * no mês, o valor do mês passa a ser A SOMA DOS LANÇAMENTOS — o valor digitado no mês é
+ * ignorado nesse campo. Assim nunca se soma duas vezes o mesmo dinheiro.
+ * Cada mês devolvido traz `auto`: { campo: quantidade de lançamentos }.
+ */
+export function aplicarLancamentos(meses, lancamentos) {
+  const out = new Map();
+  for (const m of meses) out.set(key(m.ano, m.mes), { ...m, despesas: { ...(m.despesas || {}) }, auto: {} });
+  const somas = new Map();
+  for (const l of lancamentos || []) {
+    const [a, mm] = String(l.data).split('-').map(Number);
+    const k = key(a, mm);
+    if (!somas.has(k)) somas.set(k, { ano: a, mes: mm, campos: {} });
+    const campo = l.destino === 'despesa' ? 'cat:' + l.categoria_id : l.destino;
+    const s = somas.get(k).campos;
+    s[campo] = s[campo] || { total: 0, n: 0 };
+    s[campo].total += Number(l.valor);
+    s[campo].n += 1;
+  }
+  for (const [k, { ano, mes, campos }] of somas) {
+    if (!out.has(k)) out.set(k, { ano, mes, receita: null, investimento: null, rendimento: null, saldo_inicial: null, despesas: {}, formulas: {}, auto: {} });
+    const rec = out.get(k);
+    for (const [campo, { total, n }] of Object.entries(campos)) {
+      const v = Math.round(total * 100) / 100;
+      if (campo.startsWith('cat:')) rec.despesas[campo.slice(4)] = v;
+      else rec[campo] = v;
+      rec.auto[campo] = n;
+    }
+  }
+  return [...out.values()];
+}
+
 /** Anos que têm algum dado lançado, em ordem. */
 export function anosComDados(meses) {
   return [...new Set(meses.filter(mesTemDados).map((m) => m.ano))].sort((a, b) => a - b);

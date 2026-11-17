@@ -1,7 +1,8 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261116134933';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados } from './calc.js?v=20261116134933';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261116134933';
-import { lerPlanilha } from './importer.js?v=20261116134933';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117000336';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117000336';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117000336';
+import { lerPlanilha } from './importer.js?v=20261117000336';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117000336';
 
 const app = document.getElementById('app');
 const S = {
@@ -23,11 +24,36 @@ function toast(msg, tipo = 'ok') {
 
 const cls = (v) => (v === null || v === undefined ? '' : v < 0 ? 'neg' : v > 0 ? 'pos' : '');
 const money = (v) => `<span class="${cls(v)}">${fmtBRL(v)}</span>`;
+/** Valor em destaque com centavos menores: R$ 1.566<small>,15</small> */
+const grande = (v) => {
+  const s = fmtBRL(v);
+  const m = /^(.*)(,\d{2})$/.exec(s);
+  return m ? `${m[1]}<small>${m[2]}</small>` : s;
+};
+
+/* tema: '' = automático (segue o aparelho), 'light' ou 'dark' */
+function temaAtual() { try { return localStorage.getItem('financas-tema') || ''; } catch { return ''; } }
+function definirTema(t) {
+  try { if (t) localStorage.setItem('financas-tema', t); else localStorage.removeItem('financas-tema'); } catch { /* sem armazenamento */ }
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  render();
+}
+function seletorTema() {
+  const t = temaAtual();
+  return `<div class="tema" role="group" aria-label="Tema">
+    ${[['light', 'Claro'], ['', 'Auto'], ['dark', 'Escuro']].map(([v, n]) =>
+      `<button type="button" data-tema="${v}" class="${t === v ? 'ativo' : ''}" aria-pressed="${t === v}">${n}</button>`).join('')}
+  </div>`;
+}
 const cats = () => [...S.data.categorias].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) || a.nome.localeCompare(b.nome));
 const anoAtual = () => new Date().getFullYear();
 
 function dadosVazios() {
-  return { perfis: [], categorias: [], meses: [], prefs: {} };
+  return { perfis: [], categorias: [], meses: [], lancamentos: [], prefs: {} };
+}
+/** Meses com os lançamentos já somados (é isso que as telas mostram). */
+function efetivos() {
+  return aplicarLancamentos(S.data.meses, S.data.lancamentos);
 }
 /** Percentuais de "Organização finanças" do perfil do usuário. */
 function prefs() {
@@ -38,7 +64,7 @@ function prefs() {
 function mesPadrao() {
   const hoje = new Date();
   const limite = hoje.getFullYear() * 100 + hoje.getMonth() + 1;
-  const ult = S.data.meses.filter(mesTemDados).map((m) => m.ano * 100 + m.mes).filter((n) => n <= limite).sort((a, b) => b - a)[0];
+  const ult = efetivos().filter(mesTemDados).map((m) => m.ano * 100 + m.mes).filter((n) => n <= limite).sort((a, b) => b - a)[0];
   const n = ult || limite;
   return { ano: Math.floor(n / 100), mes: n % 100 };
 }
@@ -50,6 +76,11 @@ function rota() {
   if (h[0] === 'ajuda') return { view: 'ajuda' };
   if (h[0] === 'geral') return { view: 'geral' };
   const ano = Number(h[1]), mes = Number(h[2]);
+  if (h[0] === 'lancamentos') {
+    if (ano && mes >= 1 && mes <= 12) return { view: 'lancamentos', ano, mes };
+    const d = new Date();
+    return { view: 'lancamentos', ano: d.getFullYear(), mes: d.getMonth() + 1 };
+  }
   if (h[0] === 'mes' && ano && mes >= 1 && mes <= 12) return { view: 'mes', ano, mes };
   return { view: 'mes', ...mesPadrao() };
 }
@@ -136,11 +167,18 @@ function render() {
   app.innerHTML = shell(r);
   const main = app.querySelector('main');
   if (r.view === 'mes') renderMes(main, r.ano, r.mes);
+  else if (r.view === 'lancamentos') renderLancamentos(main, r.ano, r.mes);
   else if (r.view === 'geral') renderGeral(main);
   else if (r.view === 'ano') renderAno(main, r.ano, r.aba);
   else if (r.view === 'ajuda') renderAjuda(main);
   else renderAjustes(main);
   bindShell();
+  // No celular a faixa de meses rola: centraliza o mês aberto
+  const faixa = app.querySelector('.faixa-meses');
+  const ativo = faixa?.querySelector('.ativo');
+  if (faixa && ativo && faixa.scrollWidth > faixa.clientWidth) {
+    faixa.scrollLeft = ativo.offsetLeft - faixa.clientWidth / 2 + ativo.clientWidth / 2;
+  }
 }
 
 function shell(r) {
@@ -156,12 +194,14 @@ function shell(r) {
       <nav class="nav" aria-label="Menu">
         <span class="nav-titulo">Menu</span>
         ${item('#/mes', 'mes', 'Mês', ICON.mes)}
+        ${item(r.view === 'mes' || r.view === 'lancamentos' ? `#/lancamentos/${r.ano}/${r.mes}` : '#/lancamentos', 'lancamentos', 'Lançamentos', ICON.lista)}
         ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano)}
         ${item('#/geral', 'geral', 'Todos os anos', ICON.geral)}
         <span class="nav-titulo nav-sep">Configurar</span>
         ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
         ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda)}
       </nav>
+      ${seletorTema()}
       <div class="lateral-pe">
         <span class="avatar">${esc((email[0] || '?').toUpperCase())}</span>
         <div><b>${esc(email.split('@')[0] || 'Conta')}</b><small>${S.store.mode === 'local' ? 'modo local' : esc(email)}</small></div>
@@ -179,12 +219,13 @@ function shell(r) {
 }
 
 function bindShell() {
+  app.querySelectorAll('[data-tema]').forEach((b) => b.addEventListener('click', () => definirTema(b.dataset.tema)));
   app.querySelector('[data-acao="lancar"]')?.addEventListener('click', () => {
     const d = new Date();
     const r = rota();
     if (r.view === 'mes') { abrirEditor(r.ano, r.mes); return; }
     // Sugere o último mês lançado + 1, ou o mês atual
-    const ultimos = S.data.meses.filter(mesTemDados).sort((a, b) => b.ano - a.ano || b.mes - a.mes);
+    const ultimos = efetivos().filter(mesTemDados).sort((a, b) => b.ano - a.ano || b.mes - a.mes);
     let ano = d.getFullYear(), mes = d.getMonth() + 1;
     if (r.view === 'ano' && r.ano !== ano) { ano = r.ano; mes = 1; }
     if (ultimos.length && r.view !== 'ano') {
@@ -297,7 +338,7 @@ function delta(v, ref, rotulo, menorMelhor = false) {
 
 function renderMes(main, ano, mes) {
   const c = cats();
-  const map = indexMeses(S.data.meses);
+  const map = indexMeses(efetivos());
   const l = linhaMes(ano, mes, map, c);
   const pa = anterior(ano, mes), px = seguinte(ano, mes);
   const ant = linhaMes(pa.ano, pa.mes, map, c);
@@ -306,16 +347,13 @@ function renderMes(main, ano, mes) {
   const vsAnt = `vs ${MESES_CURTO[pa.mes - 1].toLowerCase()}`;
 
   const topo = `
-    <div class="mes-topo">
-      <a class="btn icone" href="#/mes/${pa.ano}/${pa.mes}" aria-label="Mês anterior">‹</a>
-      <a class="btn icone" href="#/mes/${px.ano}/${px.mes}" aria-label="Próximo mês">›</a>
-      <h1>${MESES[mes - 1]} <span>${ano}</span></h1>
-      ${l.temDados ? '<button class="btn" data-a="editar">Editar mês</button>' : ''}
-    </div>
+    ${cabecalhoMes(ano, mes, '#/mes', `
+      <a class="btn" href="#/lancamentos/${ano}/${mes}">${ICON.lista}<span>Lançamentos</span></a>
+      ${l.temDados ? `<button class="btn primario" data-a="editar">${ICON.editar}<span>Editar mês</span></button>` : ''}`)}
     <p class="sub descricao">O resumo do mês: quanto sobrou, para onde foi o dinheiro e como foi em relação ao mês anterior.
       <a href="#/ajuda">Como usar</a></p>`;
 
-  if (!S.data.meses.some(mesTemDados)) {
+  if (!efetivos().some(mesTemDados)) {
     // Conta nova: guia de primeiros passos
     const temCats = S.data.categorias.length > 0;
     const passo = (ok, titulo, texto, acao) => `
@@ -353,7 +391,7 @@ function renderMes(main, ano, mes) {
   const gastos = c.filter((cat) => (l.desp[cat.id] ?? 0) > 0).map((cat) => ({ nome: cat.nome, valor: l.desp[cat.id], cor: corCat(cat) }));
   const sobra = l.saldoMes ?? 0;
   const base = Math.max(receita, l.totalDesp ?? 0) || 1;
-  const partes = [...gastos, ...(sobra > 0 ? [{ nome: 'Sobra', valor: sobra, cor: 'var(--pos)' }] : [])];
+  const partes = [...gastos, ...(sobra > 0 ? [{ nome: 'Sobra', valor: sobra, cor: 'var(--sobra)' }] : [])];
   const pctReceita = (v) => (receita > 0 ? ` <small>${Math.round((v / receita) * 100)}%</small>` : '');
 
   const linhaCat = (cat) => {
@@ -379,7 +417,7 @@ function renderMes(main, ano, mes) {
         <div class="hero-cab">
           <div>
             <span class="rotulo">Sobra do mês (receita − despesas)</span>
-            <strong class="valor-grande ${cls(sobra)}">${fmtBRL(sobra)}</strong>
+            <strong class="valor-grande ${cls(sobra)}">${grande(sobra)}</strong>
             <p class="sub">${receita > 0
               ? sobra >= 0 ? `<span class="pos">${Math.round((sobra / receita) * 100)}% da receita</span> ficou com você`
                 : `<span class="neg">gastou ${fmtBRL(-sobra)} além da receita</span>`
@@ -447,6 +485,23 @@ function renderMes(main, ano, mes) {
           : receita > 0 ? `<p class="hint pos">Despesas dentro do máximo de ${fmtPct(p.pct_max_gasto)} da receita.</p>` : ''}
       </section>
 
+      ${(() => {
+        const doMes = S.data.lancamentos.filter((x) => String(x.data).startsWith(`${ano}-${pad2(mes)}`))
+          .sort((a, b) => b.data.localeCompare(a.data)).slice(0, 6);
+        if (!doMes.length) return '';
+        const catPorId = new Map(S.data.categorias.map((x) => [x.id, x]));
+        return `<section class="card">
+          <h2>Últimos lançamentos</h2>
+          ${doMes.map((x) => {
+            const entrada = x.destino === 'receita' || x.destino === 'rendimento';
+            return `<div class="linha-cat"><span class="dot" style="background:${catPorId.get(x.categoria_id) ? corCat(catPorId.get(x.categoria_id)) : 'var(--pos)'}"></span>
+              <div class="nome">${esc(x.descricao)}<small>${fmtDia(x.data)} · ${esc(catPorId.get(x.categoria_id)?.nome || DESTINOS[x.destino])}${x.escopo === 'empresa' ? ' · Empresa' : ''}</small></div>
+              <div class="val"><strong class="${entrada ? 'pos' : ''}">${entrada ? '+' : '−'} ${fmtBRL(x.valor)}</strong></div></div>`;
+          }).join('')}
+          <div class="linha-total"><a href="#/lancamentos/${ano}/${mes}">Ver todos os lançamentos →</a></div>
+        </section>`;
+      })()}
+
       <section class="card grafico largo">
         <h2>Últimos 6 meses</h2>
         <div class="canvas-box"><canvas id="g-mes"></canvas></div>
@@ -462,6 +517,446 @@ function renderMes(main, ano, mes) {
     ult6.push(linhaMes(d.getFullYear(), d.getMonth() + 1, map, c));
   }
   grafico(main.querySelector('#g-mes'), ult6);
+}
+
+/* ===================================================== lançamentos */
+const DESTINOS = { despesa: 'Despesa', receita: 'Receita', rendimento: 'Rendimento / outras', investimento: 'Investimento' };
+const DIAS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+const pad2 = (n) => String(n).padStart(2, '0');
+const isoHoje = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const fmtDia = (iso) => { const [a, m, d] = iso.split('-').map(Number); return `${pad2(d)}/${pad2(m)}`; };
+const campoDe = (l) => (l.destino === 'despesa' ? 'cat:' + l.categoria_id : l.destino);
+function nomeCampo(campo) {
+  if (campo.startsWith('cat:')) return S.data.categorias.find((c) => c.id === campo.slice(4))?.nome || 'categoria';
+  return DESTINOS[campo] || campo;
+}
+/** Valor que já foi digitado como total do mês para um campo (ignorado quando há lançamentos). */
+function totalDigitado(ano, mes, campo) {
+  const rec = S.data.meses.find((x) => x.ano === ano && x.mes === mes);
+  if (!rec) return null;
+  const v = campo.startsWith('cat:') ? rec.despesas?.[campo.slice(4)] : rec[campo];
+  return v === undefined ? null : v;
+}
+
+/** Cabeçalho comum das telas por mês: setas, nome do mês e a faixa com os 12 meses. */
+function cabecalhoMes(ano, mes, base, acoes = '') {
+  const pa = anterior(ano, mes), px = seguinte(ano, mes);
+  const map = indexMeses(efetivos());
+  const hoje = new Date();
+  const ehHoje = hoje.getFullYear() === ano && hoje.getMonth() + 1 === mes;
+  return `
+    <div class="mes-topo">
+      <a class="btn icone" href="${base}/${pa.ano}/${pa.mes}" aria-label="Mês anterior">‹</a>
+      <a class="btn icone" href="${base}/${px.ano}/${px.mes}" aria-label="Próximo mês">›</a>
+      <h1>${MESES[mes - 1]} <span>${ano}</span></h1>
+      ${ehHoje ? '' : `<a class="btn fantasma" href="${base}/${hoje.getFullYear()}/${hoje.getMonth() + 1}">Mês atual</a>`}
+      <div class="mes-acoes">${acoes}</div>
+    </div>
+    <nav class="faixa-meses" aria-label="Meses de ${ano}">
+      ${MESES_CURTO.map((m, i) => {
+        const tem = mesTemDados(map.get(ano * 100 + i + 1));
+        return `<a href="${base}/${ano}/${i + 1}" class="${i + 1 === mes ? 'ativo' : ''} ${tem ? 'com-dados' : ''}"
+          title="${MESES[i]} de ${ano}: ${tem ? 'lançado' : 'sem lançamentos'}" ${i + 1 === mes ? 'aria-current="date"' : ''}>
+          <span>${m}</span><i aria-hidden="true"></i></a>`;
+      }).join('')}
+    </nav>`;
+}
+
+function renderLancamentos(main, ano, mes) {
+  const prefixo = `${ano}-${pad2(mes)}`;
+  const doMes = S.data.lancamentos.filter((l) => String(l.data).startsWith(prefixo));
+  const fl = S.filtroLanc || (S.filtroLanc = { escopo: 'todos', cat: '', busca: '' });
+  const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
+  const lista = doMes
+    .filter((l) => fl.escopo === 'todos' || l.escopo === fl.escopo)
+    .filter((l) => !fl.cat || (fl.cat.startsWith('d:') ? l.destino === fl.cat.slice(2) : l.categoria_id === fl.cat))
+    .filter((l) => !fl.busca || normDesc(l.descricao).includes(normDesc(fl.busca)))
+    .sort((a, b) => a.data.localeCompare(b.data) || a.descricao.localeCompare(b.descricao));
+  const soma = (arr, f) => arr.filter(f).reduce((s, l) => s + l.valor, 0);
+  const entradas = soma(doMes, (l) => l.destino === 'receita' || l.destino === 'rendimento');
+  const saidas = soma(doMes, (l) => l.destino === 'despesa');
+  const pessoal = soma(doMes, (l) => l.destino === 'despesa' && l.escopo === 'pessoal');
+  const empresa = soma(doMes, (l) => l.destino === 'despesa' && l.escopo === 'empresa');
+
+  const porDia = new Map();
+  for (const l of lista) { if (!porDia.has(l.data)) porDia.set(l.data, []); porDia.get(l.data).push(l); }
+
+  const linha = (l) => {
+    const cat = catPorId.get(l.categoria_id);
+    const entrada = l.destino === 'receita' || l.destino === 'rendimento';
+    const cor = cat ? corCat(cat) : entrada ? 'var(--pos)' : 'var(--c-saldo)';
+    return `<button class="lanc" data-id="${l.id}">
+      <span class="lanc-icone" style="--cor:${cor}">${entrada ? '↓' : l.destino === 'investimento' ? '◆' : '↑'}</span>
+      <span class="lanc-txt"><b>${esc(l.descricao)}</b>
+        <small>${cat ? esc(cat.nome) : DESTINOS[l.destino]}${l.escopo === 'empresa' ? ' · <span class="tag empresa">Empresa</span>' : ''}${l.origem === 'extrato' ? ' · <span class="tag">extrato</span>' : ''}</small></span>
+      <span class="lanc-valor ${entrada ? 'pos' : l.destino === 'despesa' ? 'neg' : ''}">${entrada ? '+' : '−'} ${fmtBRL(l.valor)}</span>
+    </button>`;
+  };
+
+  main.innerHTML = `
+    ${cabecalhoMes(ano, mes, '#/lancamentos', `
+      <button class="btn" data-a="importar">${ICON.upload}<span>Importar extrato</span></button>
+      <button class="btn primario" data-a="novo">${ICON.mais}<span>Novo lançamento</span></button>`)}
+    <p class="sub descricao">Cada gasto ou entrada, um por um. Use para lançar aos poucos (por semana) ou importar o extrato do banco —
+      movimentações já importadas são puladas automaticamente. <a href="#/ajuda">Como funciona</a></p>
+
+    <section class="mini-kpis">
+      <div class="card"><span>Entradas</span><strong class="pos">${fmtBRL(entradas)}</strong></div>
+      <div class="card"><span>Saídas</span><strong class="neg">${fmtBRL(saidas)}</strong></div>
+      <div class="card"><span>Pessoal</span><strong>${fmtBRL(pessoal)}</strong></div>
+      <div class="card"><span>Empresa</span><strong>${fmtBRL(empresa)}</strong></div>
+    </section>
+
+    <section class="card">
+      <div class="filtros-lanc">
+        <div class="seg" role="group" aria-label="Pessoal ou empresa">
+          ${[['todos', 'Todos'], ['pessoal', 'Pessoal'], ['empresa', 'Empresa']].map(([v, t]) =>
+            `<button data-escopo="${v}" class="${fl.escopo === v ? 'ativo' : ''}" aria-pressed="${fl.escopo === v}">${t}</button>`).join('')}
+        </div>
+        <select data-f="cat" aria-label="Categoria">
+          <option value="">Todas as categorias</option>
+          ${cats().map((c) => `<option value="${c.id}" ${fl.cat === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
+          ${['receita', 'rendimento', 'investimento'].map((d) => `<option value="d:${d}" ${fl.cat === 'd:' + d ? 'selected' : ''}>${DESTINOS[d]}</option>`).join('')}
+        </select>
+        <input type="search" data-f="busca" placeholder="Buscar descrição…" value="${esc(fl.busca)}" aria-label="Buscar">
+        <span class="contagem">${lista.length} de ${doMes.length}</span>
+      </div>
+      ${!doMes.length ? `
+        <div class="vazio-lanc">
+          <p><b>Nenhum lançamento em ${MESES[mes - 1].toLowerCase()}.</b></p>
+          <p class="sub">Lançamentos são opcionais: dá para lançar só os totais na tela <a href="#/mes/${ano}/${mes}">Mês</a>.
+            Use esta tela se quiser registrar gasto por gasto ou importar o extrato.</p>
+        </div>`
+        : !lista.length ? '<p class="sub">Nenhum lançamento com esse filtro.</p>'
+        : [...porDia.entries()].map(([dia, ls]) => {
+          const d = new Date(dia + 'T12:00:00');
+          const totalDia = ls.reduce((s, l) => s + (l.destino === 'despesa' ? -l.valor : l.destino === 'investimento' ? 0 : l.valor), 0);
+          return `<div class="dia"><div class="dia-cab"><span>${DIAS[d.getDay()]}, ${fmtDia(dia)}</span><span class="${cls(totalDia)}">${fmtBRL(totalDia)}</span></div>
+            ${ls.map(linha).join('')}</div>`;
+        }).join('')}
+    </section>`;
+
+  main.querySelector('[data-a="novo"]').addEventListener('click', () => abrirLancamento(null, { ano, mes }));
+  main.querySelector('[data-a="importar"]').addEventListener('click', () => abrirImportacao({ ano, mes }));
+  main.querySelectorAll('.lanc').forEach((b) => b.addEventListener('click', () => {
+    abrirLancamento(S.data.lancamentos.find((l) => l.id === b.dataset.id), { ano, mes });
+  }));
+  main.querySelectorAll('[data-escopo]').forEach((b) => b.addEventListener('click', () => { fl.escopo = b.dataset.escopo; render(); }));
+  main.querySelector('[data-f="cat"]').addEventListener('change', (e) => { fl.cat = e.target.value; render(); });
+  const busca = main.querySelector('[data-f="busca"]');
+  busca.addEventListener('input', () => {
+    clearTimeout(renderLancamentos._t);
+    renderLancamentos._t = setTimeout(() => {
+      fl.busca = busca.value; render();
+      const b2 = app.querySelector('[data-f="busca"]');
+      if (b2) { b2.focus(); b2.setSelectionRange(b2.value.length, b2.value.length); }
+    }, 250);
+  });
+}
+
+/** Sugere a categoria pelo histórico: a última usada com a mesma descrição. */
+function categoriaPorHistorico(descricao) {
+  const n = normDesc(descricao);
+  if (!n) return null;
+  const achado = [...S.data.lancamentos].reverse().find((l) => l.destino === 'despesa' && normDesc(l.descricao) === n);
+  return achado?.categoria_id || null;
+}
+
+function abrirLancamento(existente, { ano, mes }) {
+  const c = cats().filter((x) => x.ativo !== false || x.id === existente?.categoria_id);
+  if (!c.length) { toast('Cadastre um cartão ou categoria em Ajustes primeiro.', 'erro'); location.hash = '#/ajustes'; return; }
+  const hoje = new Date();
+  const noMes = hoje.getFullYear() === ano && hoje.getMonth() + 1 === mes;
+  const dataPadrao = existente?.data || (noMes ? isoHoje() : `${ano}-${pad2(mes)}-01`);
+  const descricoes = [...new Set(S.data.lancamentos.map((l) => l.descricao))].slice(-300);
+
+  const dlg = document.createElement('dialog');
+  dlg.className = 'editor';
+  dlg.innerHTML = `
+    <form>
+      <header><h2>${existente ? 'Editar lançamento' : 'Novo lançamento'}</h2></header>
+      <div class="corpo">
+        <div class="seg largo" role="radiogroup" aria-label="Tipo">
+          ${Object.entries(DESTINOS).map(([v, t]) => `<label><input type="radio" name="destino" value="${v}" ${(existente?.destino || 'despesa') === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}
+        </div>
+        <div class="campos-2">
+          <label class="campo"><span>Data</span><input type="date" name="data" value="${dataPadrao}" required></label>
+          <label class="campo"><span>Valor</span><input name="valor" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${existente ? esc(String(existente.valor).replace('.', ',')) : ''}" required><small class="calc-preview"></small></label>
+        </div>
+        <label class="campo"><span>Descrição</span><input name="descricao" list="lista-descricoes" maxlength="200" autocomplete="off" placeholder="Ex.: Mercado, Pix João (salário), Fatura..." value="${esc(existente?.descricao || '')}" required></label>
+        <datalist id="lista-descricoes">${descricoes.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>
+        <label class="campo" data-so-despesa><span>Cartão / categoria</span>
+          <select name="categoria_id">${c.map((x) => `<option value="${x.id}" ${existente?.categoria_id === x.id ? 'selected' : ''}>${esc(x.nome)} (${x.tipo === 'debito' ? 'débito' : 'crédito'})</option>`).join('')}</select>
+        </label>
+        <div class="campo"><span>Este gasto é</span>
+          <div class="seg" role="radiogroup" aria-label="Pessoal ou empresa">
+            ${[['pessoal', 'Pessoal'], ['empresa', 'Da empresa']].map(([v, t]) => `<label><input type="radio" name="escopo" value="${v}" ${(existente?.escopo || 'pessoal') === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}
+          </div>
+        </div>
+        ${existente?.origem === 'extrato' ? `<p class="hint">Veio do extrato${existente.conta ? ` (${esc(existente.conta)})` : ''}. Se importar o mesmo extrato de novo, ele não será repetido.</p>` : ''}
+      </div>
+      <footer>
+        ${existente ? '<button type="button" class="btn perigo" data-a="excluir">Excluir</button>' : '<span></span>'}
+        <div class="direita">
+          <button type="button" class="btn" data-a="cancelar">Cancelar</button>
+          ${existente ? '' : '<button type="button" class="btn" data-a="mais">Salvar e lançar outro</button>'}
+          <button type="submit" class="btn primario">Salvar</button>
+        </div>
+      </footer>
+    </form>`;
+  document.body.appendChild(dlg);
+  const form = dlg.querySelector('form');
+  const fechar = () => { dlg.close(); dlg.remove(); };
+  const atualizarTipo = () => {
+    const d = form.destino.value;
+    dlg.querySelector('[data-so-despesa]').hidden = d !== 'despesa';
+  };
+  form.addEventListener('change', atualizarTipo);
+  atualizarTipo();
+  form.valor.addEventListener('input', () => {
+    const prev = form.valor.parentElement.querySelector('.calc-preview');
+    try { const r = parseExpr(form.valor.value); prev.textContent = r.formula ? `= ${fmtBRL(r.value)}` : ''; form.valor.classList.remove('invalido'); }
+    catch (e) { prev.textContent = e.message; form.valor.classList.add('invalido'); }
+  });
+  // Ao escolher uma descrição já usada, sugere a mesma categoria
+  form.descricao.addEventListener('change', () => {
+    if (existente) return;
+    const sug = categoriaPorHistorico(form.descricao.value);
+    if (sug && form.categoria_id.querySelector(`option[value="${sug}"]`)) form.categoria_id.value = sug;
+  });
+
+  async function salvar() {
+    let valor;
+    try { valor = parseExpr(form.valor.value).value; } catch (e) { toast(e.message, 'erro'); return false; }
+    const destino = form.destino.value;
+    const l = {
+      ...(existente || {}),
+      perfil_id: S.perfilId,
+      data: form.data.value,
+      descricao: form.descricao.value.trim(),
+      valor,
+      destino,
+      categoria_id: destino === 'despesa' ? form.categoria_id.value : null,
+      escopo: form.escopo.value,
+      origem: existente?.origem || 'manual',
+    };
+    if (!l.data || !l.descricao || !(l.valor > 0)) { toast('Preencha data, descrição e um valor maior que zero.', 'erro'); return false; }
+    // 1) Mesmo lançamento já existe?
+    const dup = S.data.lancamentos.find((x) => x.id !== l.id && x.data === l.data && Math.abs(x.valor - l.valor) < 0.005 && normDesc(x.descricao) === normDesc(l.descricao));
+    if (dup && !confirm(`Já existe um lançamento igual em ${fmtDia(dup.data)}:\n"${dup.descricao}" — ${fmtBRL(dup.valor)}\n\nSalvar mesmo assim? (só se for outro gasto igual)`)) return false;
+    // 2) O mês já tinha um total digitado para esse campo?
+    const [a, m] = l.data.split('-').map(Number);
+    const campo = campoDe(l);
+    const jaTem = S.data.lancamentos.some((x) => x.id !== l.id && x.data.startsWith(`${a}-${pad2(m)}`) && campoDe(x) === campo);
+    const digitado = totalDigitado(a, m, campo);
+    if (!jaTem && digitado !== null && !confirm(`${MESES[m - 1]} de ${a} já tem um total digitado em "${nomeCampo(campo)}" (${fmtBRL(digitado)}).\n\nCom lançamentos, esse campo passa a ser a SOMA dos lançamentos e o total digitado deixa de contar (para não somar duas vezes).\n\nContinuar?`)) return false;
+    try {
+      const salvo = await S.store.saveLancamento(l);
+      const i = S.data.lancamentos.findIndex((x) => x.id === salvo.id);
+      if (i >= 0) S.data.lancamentos[i] = salvo; else S.data.lancamentos.push(salvo);
+      toast('Lançamento salvo.');
+      return true;
+    } catch (e) { toast('Erro ao salvar: ' + e.message, 'erro'); return false; }
+  }
+
+  form.addEventListener('submit', async (e) => { e.preventDefault(); if (await salvar()) { fechar(); render(); } });
+  dlg.querySelector('[data-a="mais"]')?.addEventListener('click', async () => {
+    if (!form.reportValidity()) return;
+    if (await salvar()) {
+      render();
+      form.descricao.value = ''; form.valor.value = '';
+      form.valor.parentElement.querySelector('.calc-preview').textContent = '';
+      form.descricao.focus();
+    }
+  });
+  dlg.querySelector('[data-a="cancelar"]').addEventListener('click', fechar);
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); fechar(); });
+  dlg.querySelector('[data-a="excluir"]')?.addEventListener('click', async () => {
+    if (!confirm(`Excluir "${existente.descricao}" (${fmtBRL(existente.valor)})?`)) return;
+    try {
+      await S.store.deleteLancamento(existente.id);
+      S.data.lancamentos = S.data.lancamentos.filter((x) => x.id !== existente.id);
+      toast('Lançamento excluído.');
+      fechar(); render();
+    } catch (e) { toast(e.message, 'erro'); }
+  });
+  dlg.showModal();
+  (existente ? form.valor : form.descricao).focus();
+}
+
+/* ------------------------------------------------- importar extrato */
+function abrirImportacao({ ano, mes }) {
+  const c = cats().filter((x) => x.ativo !== false);
+  if (!c.length) { toast('Cadastre um cartão ou categoria em Ajustes primeiro.', 'erro'); location.hash = '#/ajustes'; return; }
+  const dlg = document.createElement('dialog');
+  dlg.className = 'editor largo';
+  const fechar = () => { dlg.close(); dlg.remove(); };
+  let lido = null;
+  let cfg = { categoria: c[0].id, escopo: 'pessoal', inverter: false };
+
+  function passo1() {
+    dlg.innerHTML = `
+      <form>
+        <header><h2>Importar extrato</h2></header>
+        <div class="corpo">
+          <p class="sub">Exporte o extrato no site/app do banco em <b>OFX</b> (melhor) ou <b>CSV</b>. Pode ser da conta ou do cartão,
+            de uma semana ou do mês inteiro. Movimentações que já foram importadas antes são <b>puladas automaticamente</b>.</p>
+          <label class="campo"><span>Arquivo do extrato</span><input type="file" name="arquivo" accept=".ofx,.csv,.txt" required></label>
+          <label class="campo"><span>Este extrato é de qual conta/cartão?</span>
+            <select name="categoria">${c.map((x) => `<option value="${x.id}" ${cfg.categoria === x.id ? 'selected' : ''}>${esc(x.nome)} (${x.tipo === 'debito' ? 'débito' : 'crédito'})</option>`).join('')}</select>
+            <small class="hint">Os gastos vão para essa categoria. Gastos com descrição já conhecida usam a categoria da última vez.</small>
+          </label>
+          <div class="campo"><span>Os gastos deste extrato são</span>
+            <div class="seg" role="radiogroup">
+              ${[['pessoal', 'Pessoais'], ['empresa', 'Da empresa']].map(([v, t]) => `<label><input type="radio" name="escopo" value="${v}" ${cfg.escopo === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}
+            </div>
+            <small class="hint">Dá para mudar linha por linha na próxima tela (ex.: gasto da empresa no cartão pessoal).</small>
+          </div>
+          <p class="erro-msg" hidden></p>
+        </div>
+        <footer><span></span><div class="direita">
+          <button type="button" class="btn" data-a="cancelar">Cancelar</button>
+          <button type="submit" class="btn primario">Ler extrato</button>
+        </div></footer>
+      </form>`;
+    const form = dlg.querySelector('form');
+    form.querySelector('[data-a="cancelar"]').addEventListener('click', fechar);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const erro = form.querySelector('.erro-msg');
+      try {
+        cfg = { ...cfg, categoria: form.categoria.value, escopo: form.escopo.value };
+        lido = await lerExtrato(form.arquivo.files[0]);
+        if (!lido.linhas.length) throw new Error('Nenhuma movimentação encontrada no arquivo.');
+        lido.linhas.forEach((l) => { l.incluir = undefined; });
+        passo2();
+      } catch (ex) { erro.textContent = ex.message; erro.hidden = false; }
+    });
+  }
+
+  function passo2() {
+    const catPadrao = S.data.categorias.find((x) => x.id === cfg.categoria);
+    const chaves = new Set(S.data.lancamentos.filter((l) => l.chave).map((l) => l.chave));
+    const linhas = lido.linhas.map((l, i) => {
+      const valor = cfg.inverter ? -l.valor : l.valor;
+      let status = 'novo';
+      if (chaves.has(l.chave)) status = 'ja';
+      else if (S.data.lancamentos.some((x) => x.data === l.data && Math.abs(x.valor - Math.abs(valor)) < 0.005
+        && (normDesc(x.descricao).slice(0, 10) === normDesc(l.descricao).slice(0, 10) || x.origem === 'manual'))) status = 'parece';
+      const saida = valor < 0;
+      const sug = saida ? categoriaPorHistorico(l.descricao) : null;
+      return {
+        i, ...l, valor: Math.abs(valor), saida, status,
+        incluir: l.incluir ?? status === 'novo',
+        destino: l.destinoEscolhido ?? (saida ? 'despesa' : catPadrao?.tipo === 'credito' ? 'ignorar' : 'receita'),
+        categoria_id: l.catEscolhida ?? (sug || cfg.categoria),
+        escopo: l.escopoEscolhido ?? cfg.escopo,
+      };
+    });
+    const datas = linhas.map((l) => l.data).sort();
+    const n = (s) => linhas.filter((l) => l.status === s).length;
+    const opcoesCat = (sel) => c.map((x) => `<option value="${x.id}" ${sel === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('');
+    const selecionadas = linhas.filter((l) => l.incluir && l.status !== 'ja' && l.destino !== 'ignorar');
+
+    dlg.innerHTML = `
+      <form>
+        <header><h2>Conferir extrato</h2></header>
+        <div class="corpo">
+          <p class="sub">${esc(lido.formato)} · ${esc(lido.conta)} · ${fmtDia(datas[0])} a ${fmtDia(datas[datas.length - 1])} · ${linhas.length} movimentações</p>
+          <div class="status-import">
+            <span class="tag pos">${n('novo')} novas</span>
+            <span class="tag">${n('ja')} já importadas (serão puladas)</span>
+            ${n('parece') ? `<span class="tag aviso">${n('parece')} parecem repetidas (desmarcadas — confira)</span>` : ''}
+          </div>
+          <label class="check-linha"><input type="checkbox" name="inverter" ${cfg.inverter ? 'checked' : ''}>
+            Inverter sinais <small class="sub">(marque se as compras aparecerem como entrada)</small></label>
+          <div class="tabela-wrap">
+            <table class="tabela import">
+              <thead><tr><th></th><th>Data</th><th>Descrição</th><th>Valor</th><th>Tipo</th><th>Categoria</th><th>Pessoal / empresa</th></tr></thead>
+              <tbody>
+                ${linhas.map((l) => `
+                  <tr data-i="${l.i}" class="${l.status}">
+                    <td><input type="checkbox" data-c="incluir" ${l.incluir && l.status !== 'ja' ? 'checked' : ''} ${l.status === 'ja' ? 'disabled' : ''} aria-label="Importar"></td>
+                    <td>${fmtDia(l.data)}</td>
+                    <td class="desc">${esc(l.descricao)}${l.status === 'ja' ? ' <span class="tag">já importada</span>' : l.status === 'parece' ? ' <span class="tag aviso">parece repetida</span>' : ''}</td>
+                    <td class="${l.saida ? 'neg' : 'pos'}">${l.saida ? '−' : '+'} ${fmtNum(l.valor)}</td>
+                    <td><select data-c="destino" ${l.status === 'ja' ? 'disabled' : ''}>
+                      ${[['despesa', 'Despesa'], ['receita', 'Receita'], ['rendimento', 'Rendim./outras'], ['investimento', 'Investimento'], ['ignorar', 'Ignorar']]
+                        .map(([v, t]) => `<option value="${v}" ${l.destino === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+                    <td><select data-c="categoria" ${l.status === 'ja' || l.destino !== 'despesa' ? 'disabled' : ''}>${opcoesCat(l.categoria_id)}</select></td>
+                    <td><select data-c="escopo" ${l.status === 'ja' ? 'disabled' : ''}>
+                      <option value="pessoal" ${l.escopo === 'pessoal' ? 'selected' : ''}>Pessoal</option>
+                      <option value="empresa" ${l.escopo === 'empresa' ? 'selected' : ''}>Empresa</option></select></td>
+                  </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+          <p class="hint">"Ignorar" serve para o que não é gasto nem receita, como o pagamento da fatura do cartão ou transferência entre suas contas.</p>
+        </div>
+        <footer>
+          <button type="button" class="btn" data-a="voltar">Voltar</button>
+          <div class="direita">
+            <button type="button" class="btn" data-a="cancelar">Cancelar</button>
+            <button type="submit" class="btn primario" ${selecionadas.length ? '' : 'disabled'}>Importar ${selecionadas.length}</button>
+          </div>
+        </footer>
+      </form>`;
+
+    const form = dlg.querySelector('form');
+    const orig = (i) => lido.linhas[i];
+    form.querySelectorAll('tr[data-i]').forEach((tr) => {
+      const l = orig(Number(tr.dataset.i));
+      tr.querySelector('[data-c="incluir"]').addEventListener('change', (e) => { l.incluir = e.target.checked; passo2(); });
+      tr.querySelector('[data-c="destino"]').addEventListener('change', (e) => { l.destinoEscolhido = e.target.value; passo2(); });
+      tr.querySelector('[data-c="categoria"]').addEventListener('change', (e) => { l.catEscolhida = e.target.value; });
+      tr.querySelector('[data-c="escopo"]').addEventListener('change', (e) => { l.escopoEscolhido = e.target.value; });
+    });
+    form.inverter.addEventListener('change', (e) => {
+      cfg.inverter = e.target.checked;
+      lido.linhas.forEach((l) => { delete l.destinoEscolhido; delete l.catEscolhida; });
+      passo2();
+    });
+    form.querySelector('[data-a="voltar"]').addEventListener('click', passo1);
+    form.querySelector('[data-a="cancelar"]').addEventListener('click', fechar);
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      // Lê de novo os selects (categoria/escopo mudam sem redesenhar)
+      const atuais = linhas.map((l) => ({ ...l, categoria_id: orig(l.i).catEscolhida ?? l.categoria_id, escopo: orig(l.i).escopoEscolhido ?? l.escopo }))
+        .filter((l) => l.incluir && l.status !== 'ja' && l.destino !== 'ignorar');
+      const novos = atuais.map((l) => ({
+        perfil_id: S.perfilId, data: l.data, descricao: l.descricao.slice(0, 200), valor: Math.round(l.valor * 100) / 100,
+        destino: l.destino, categoria_id: l.destino === 'despesa' ? l.categoria_id : null,
+        escopo: l.escopo, origem: 'extrato', conta: lido.conta, chave: l.chave,
+      }));
+      // Avisa se algum mês já tinha total digitado nesses campos
+      const afetados = new Set();
+      for (const l of novos) {
+        const [a, m] = l.data.split('-').map(Number);
+        const campo = campoDe(l);
+        const jaTem = S.data.lancamentos.some((x) => x.data.startsWith(`${a}-${pad2(m)}`) && campoDe(x) === campo);
+        if (!jaTem && totalDigitado(a, m, campo) !== null) afetados.add(`${MESES_CURTO[m - 1]}/${String(a).slice(2)}: ${nomeCampo(campo)}`);
+      }
+      if (afetados.size && !confirm(`Estes campos já tinham total digitado e passarão a ser a soma dos lançamentos:\n\n${[...afetados].join('\n')}\n\nContinuar?`)) return;
+      const btn = form.querySelector('[type="submit"]');
+      btn.disabled = true;
+      try {
+        const inseridos = await S.store.importarLancamentos(novos);
+        S.data.lancamentos.push(...inseridos);
+        const pulados = linhas.length - inseridos.length;
+        toast(`${inseridos.length} importados${pulados ? ` · ${pulados} pulados (repetidos ou ignorados)` : ''}.`);
+        fechar();
+        render();
+      } catch (ex) {
+        toast('Erro ao importar: ' + ex.message, 'erro');
+        btn.disabled = false;
+      }
+    });
+  }
+
+  document.body.appendChild(dlg);
+  dlg.addEventListener('cancel', (e) => { e.preventDefault(); fechar(); });
+  passo1();
+  dlg.showModal();
 }
 
 /* ---------------------------------------------------------- filtro */
@@ -558,16 +1053,16 @@ function renderGeral(main) {
   const f = S.filtro;
   const todasCats = cats();
   const c = f.cats ? todasCats.filter((x) => f.cats.includes(x.id)) : todasCats;
-  const map = indexMeses(S.data.meses);
+  const map = indexMeses(efetivos());
   const iv = intervalo(f);
   const dentro = (r) => !iv || (r.ano * 100 + r.mes >= iv.de && r.ano * 100 + r.mes <= iv.ate);
-  const porAno = anosComDados(S.data.meses)
+  const porAno = anosComDados(efetivos())
     .map((ano) => ({ ano, linhas: linhasDoAno(ano, map, c).filter(dentro) }))
     .filter((a) => a.linhas.some((l) => l.temDados));
   const todas = porAno.flatMap((a) => a.linhas);
   const st = estatisticas(todas, c, prefs());
 
-  if (!st.mesesComDados && !S.data.meses.some(mesTemDados)) {
+  if (!st.mesesComDados && !efetivos().some(mesTemDados)) {
     main.innerHTML = `
       <section class="vazio card">
         <h1>Bem-vindo às Finanças Marques</h1>
@@ -697,7 +1192,7 @@ function blocoInfo(titulo, secoes) {
 /* ================================================================ ano */
 /** Cabeçalho do ano: seletor de ano + abas Resumo / Planilha. */
 function cabecalhoAno(ano, aba, st) {
-  const anos = [...new Set([...anosComDados(S.data.meses), anoAtual(), ano, ano - 1, ano + 1])].sort((a, b) => a - b);
+  const anos = [...new Set([...anosComDados(efetivos()), anoAtual(), ano, ano - 1, ano + 1])].sort((a, b) => a - b);
   const sufixo = aba === 'planilha' ? '/planilha' : '';
   return `
     <div class="titulo">
@@ -730,7 +1225,7 @@ function renderAno(main, ano, aba) {
 
 function renderAnoResumo(main, ano) {
   const c = cats();
-  const map = indexMeses(S.data.meses);
+  const map = indexMeses(efetivos());
   const linhas = linhasDoAno(ano, map, c);
   const st = estatisticas(linhas, c, prefs());
   const linhasAnt = linhasDoAno(ano - 1, map, c);
@@ -762,7 +1257,7 @@ function renderAnoResumo(main, ano) {
   const base = Math.max(receita, st.gastoTotal) || 1;
   const partes = [
     ...st.porCategoria.filter((x) => x.total > 0).map((x) => ({ nome: x.cat.nome, valor: x.total, cor: corCat(x.cat) })),
-    ...(sobra > 0 ? [{ nome: 'Sobra', valor: sobra, cor: 'var(--pos)' }] : []),
+    ...(sobra > 0 ? [{ nome: 'Sobra', valor: sobra, cor: 'var(--sobra)' }] : []),
   ];
   const pctReceita = (v) => (receita > 0 ? ` <small>${Math.round((v / receita) * 100)}%</small>` : '');
 
@@ -776,7 +1271,7 @@ function renderAnoResumo(main, ano) {
         <div class="hero-cab">
           <div>
             <span class="rotulo">Sobra de ${ano} (receita − despesas)</span>
-            <strong class="valor-grande ${cls(sobra)}">${fmtBRL(sobra)}</strong>
+            <strong class="valor-grande ${cls(sobra)}">${grande(sobra)}</strong>
             <p class="sub">${receita > 0
               ? sobra >= 0 ? `<span class="pos">${Math.round((sobra / receita) * 100)}% da receita</span> ficou com você`
                 : `<span class="neg">gastou ${fmtBRL(-sobra)} além da receita</span>`
@@ -918,7 +1413,7 @@ function graficoSaldo(canvas, linhas) {
 
 function renderAnoPlanilha(main, ano) {
   const c = cats();
-  const map = indexMeses(S.data.meses);
+  const map = indexMeses(efetivos());
   const linhas = linhasDoAno(ano, map, c);
   // Mostra categorias ativas + inativas que têm valor neste ano
   const colunas = c.filter((cat) => cat.ativo !== false || linhas.some((l) => l.desp[cat.id] !== null));
@@ -1040,16 +1535,31 @@ async function abrirEditor(ano, mes) {
   try { await garantirCategorias(); } catch (e) { toast(e.message, 'erro'); return; }
   const rec = S.data.meses.find((m) => m.ano === ano && m.mes === mes) || { ano, mes, despesas: {}, formulas: {} };
   const f = rec.formulas || {};
-  const c = cats().filter((cat) => cat.ativo !== false || (rec.despesas?.[cat.id] ?? null) !== null);
-  const prox = S.data.meses.find((m) => (mes === 12 ? m.ano === ano + 1 && m.mes === 1 : m.ano === ano && m.mes === mes + 1));
+  // Mês "efetivo": inclui as somas dos lançamentos (campos em ef.auto vêm dos lançamentos)
+  const ef = efetivos().find((m) => m.ano === ano && m.mes === mes) || { despesas: {}, auto: {} };
+  const autoVal = (name) => (ef.auto?.[name] ? (name.startsWith('cat:') ? ef.despesas[name.slice(4)] : ef[name]) : undefined);
+  const c = cats().filter((cat) => cat.ativo !== false || (rec.despesas?.[cat.id] ?? null) !== null || ef.auto?.['cat:' + cat.id]);
+  const prox = efetivos().find((m) => (mes === 12 ? m.ano === ano + 1 && m.mes === 1 : m.ano === ano && m.mes === mes + 1));
 
-  const campo = (name, label, value, formula, hint = '') => `
+  const campo = (name, label, value, formula, hint = '') => {
+    const n = ef.auto?.[name];
+    if (n) {
+      return `
+      <label class="campo auto">
+        <span>${esc(label)}</span>
+        <input name="${esc(name)}" value="${esc(fmtNum(autoVal(name)))}" disabled>
+        <small class="hint">${ICON.lista} Soma de ${n} ${n === 1 ? 'lançamento' : 'lançamentos'}. Para mudar, use a tela
+          <a href="#/lancamentos/${ano}/${mes}" data-fechar>Lançamentos</a>.</small>
+      </label>`;
+    }
+    return `
     <label class="campo">
       <span>${esc(label)}</span>
       <input name="${esc(name)}" inputmode="decimal" autocomplete="off" placeholder="0,00" value="${esc(toInputText(value, formula))}">
       <small class="calc-preview"></small>
       ${hint ? `<small class="hint">${hint}</small>` : ''}
     </label>`;
+  };
 
   const dlg = document.createElement('dialog');
   dlg.className = 'editor';
@@ -1092,7 +1602,8 @@ async function abrirEditor(ano, mes) {
   function ler() {
     const out = { perfil_id: S.perfilId, ano, mes, despesas: {}, formulas: {}, observacao: form.observacao.value.trim() || null };
     let erro = null;
-    form.querySelectorAll('input[name]').forEach((inp) => {
+    // Campos travados (vindos dos lançamentos) não são salvos no mês
+    form.querySelectorAll('input[name]:not([disabled])').forEach((inp) => {
       const prev = inp.parentElement.querySelector('.calc-preview');
       try {
         const { value, formula } = parseExpr(inp.value);
@@ -1114,8 +1625,10 @@ async function abrirEditor(ano, mes) {
   function atualizarResumo() {
     const { out } = ler();
     const vals = Object.values(out.despesas);
+    for (const [campo] of Object.entries(ef.auto || {})) if (campo.startsWith('cat:')) vals.push(autoVal(campo));
     const total = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
-    const saldo = total === null ? null : (out.receita ?? 0) - total;
+    const receita = autoVal('receita') ?? out.receita;
+    const saldo = total === null ? null : (receita ?? 0) - total;
     const fin = prox?.saldo_inicial ?? null;
     const res = out.saldo_inicial !== null && out.saldo_inicial !== undefined && fin !== null ? fin - out.saldo_inicial : null;
     dlg.querySelector('.resumo-mes').innerHTML = `
@@ -1163,7 +1676,7 @@ async function abrirEditor(ano, mes) {
   });
   dlg.querySelector('[data-acao="cancelar"]').addEventListener('click', fechar);
   dlg.addEventListener('cancel', (e) => { e.preventDefault(); fechar(); });
-  dlg.querySelector('a.link-peq').addEventListener('click', fechar);
+  dlg.querySelectorAll('a.link-peq, a[data-fechar]').forEach((a) => a.addEventListener('click', fechar));
   dlg.querySelectorAll('[data-nav]').forEach((b) => b.addEventListener('click', async () => {
     const d = Number(b.dataset.nav);
     const alvo = new Date(ano, mes - 1 + d, 1);
@@ -1222,11 +1735,29 @@ function renderAjuda(main) {
         <h2>Para que serve cada tela</h2>
         <dl class="lista telas">
           <div><dt>${ICON.mes} Mês</dt><dd>O resumo de um mês: quanto sobrou, para onde foi o dinheiro, cada cartão e a comparação com o mês anterior. É a tela do dia a dia.</dd></div>
+          <div><dt>${ICON.lista} Lançamentos</dt><dd>Cada gasto ou entrada, um por um, com data e se é pessoal ou da empresa. Também é onde se importa o extrato do banco.</dd></div>
           <div><dt>${ICON.ano} Ano · Resumo</dt><dd>O ano inteiro: total que entrou e saiu, divisão por cartão/categoria, melhores e piores meses, investimentos e evolução do saldo.</dd></div>
           <div><dt>${ICON.ano} Ano · Planilha</dt><dd>Igual à aba do ano no Excel: um mês por linha e as informações gerais ao lado. Toque num mês para editar.</dd></div>
           <div><dt>${ICON.geral} Todos os anos</dt><dd>Soma de todos os anos, com filtro por período e por cartão/categoria.</dd></div>
           <div><dt>${ICON.ajustes} Ajustes</dt><dd>Cartões e categorias, metas (15%/6×/70%), importar a planilha do Excel e backup.</dd></div>
         </dl>
+      </section>
+
+      <section class="card">
+        <h2>Lançamentos e extratos (sem repetir nada)</h2>
+        <p class="sub">Há duas formas de lançar — use a que for mais prática:</p>
+        <ol class="passos">
+          <li><b>Só o total do mês</b>, na tela Mês (como na planilha).</li>
+          <li><b>Gasto por gasto</b>, na tela Lançamentos: à mão (ex.: toda semana) ou <b>importando o extrato</b> do banco/cartão (arquivo OFX ou CSV).</li>
+        </ol>
+        <p class="sub">Como o site evita contar duas vezes:</p>
+        <ul class="passos">
+          <li>Quando um campo do mês tem lançamentos, o valor do mês é <b>a soma deles</b> e o campo fica travado na tela Mês.</li>
+          <li>Ao importar, cada movimentação do banco tem uma identidade. <b>Importar o mesmo extrato de novo, ou um que repete dias, pula o que já entrou.</b></li>
+          <li>Ao lançar à mão algo com mesma data, valor e descrição de um lançamento existente, o site <b>avisa antes de salvar</b>.</li>
+          <li>Na importação, o que parece repetido de um lançamento manual vem <b>desmarcado</b> para você conferir.</li>
+          <li>Pagamento da fatura do cartão e transferência entre contas: marque como <b>Ignorar</b> (não é gasto).</li>
+        </ul>
       </section>
 
       <section class="card">
@@ -1267,7 +1798,7 @@ function renderAjuda(main) {
 /* ============================================================ ajustes */
 function renderAjustes(main) {
   const c = cats();
-  const usada = (id) => S.data.meses.some((m) => m.despesas && m.despesas[id] !== undefined && m.despesas[id] !== null);
+  const usada = (id) => S.data.lancamentos.some((l) => l.categoria_id === id) || S.data.meses.some((m) => m.despesas && m.despesas[id] !== undefined && m.despesas[id] !== null);
   const p = prefs();
   main.innerHTML = `
     <div class="titulo"><div><h1>Ajustes</h1><p class="sub">Configure o que o site usa nos cálculos. Conta: ${esc(S.user.email || '')}</p></div></div>
@@ -1315,6 +1846,12 @@ function renderAjustes(main) {
       <p class="sub">Selecione o arquivo <b>FINANÇAS GERAIS.xlsx</b>. As abas de ano (2026, 2027…) são lidas aqui no navegador; meses que já existirem no site serão substituídos.</p>
       <label class="btn arquivo">Escolher planilha…<input type="file" accept=".xlsx,.xls" data-a="xlsx" hidden></label>
       <div class="import-preview"></div>
+    </section>
+
+    <section class="card">
+      <h2>Aparência</h2>
+      <p class="sub">Claro, escuro ou automático (segue o celular/computador). Vale só para este aparelho.</p>
+      <div class="acoes">${seletorTema()}</div>
     </section>
 
     <section class="card">
@@ -1498,6 +2035,9 @@ const ICON = {
   ano: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18"/>'),
   ajustes: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   mais: svg('<path d="M12 5v14M5 12h14"/>'),
+  editar: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
+  lista: svg('<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>'),
+  upload: svg('<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>'),
   ajuda: svg('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17h.01"/>'),
 };
 
