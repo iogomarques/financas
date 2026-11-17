@@ -187,3 +187,54 @@ revoke all on public.fin_lancamentos from anon;
 create policy "fin lancamentos do dono" on public.fin_lancamentos for all to authenticated
   using ((select auth.uid()) = user_id and (select public.fin_acesso()))
   with check ((select auth.uid()) = user_id and (select public.fin_acesso()));
+
+-- ===================================================================
+-- Categorias de gasto e regras automáticas (aplicado em 17/11/2026)
+-- fin_categorias = de onde saiu o dinheiro (contas e cartões)
+-- fin_classes    = com o que foi gasto (Funcionários, Assinaturas...)
+-- Pessoal × empresa é por lançamento (fin_lancamentos.escopo); a categoria
+-- tem um lado padrão e a regra pode fixar o lado.
+-- ===================================================================
+create table if not exists public.fin_classes (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null default auth.uid() references auth.users (id) on delete restrict,
+  perfil_id     uuid not null,
+  nome          text not null check (char_length(nome) between 1 and 60),
+  cor           text not null default '#64748b' check (cor ~ '^#[0-9a-fA-F]{6}$'),
+  ordem         int  not null default 0,
+  ativo         boolean not null default true,
+  escopo_padrao text check (escopo_padrao in ('pessoal', 'empresa')),
+  created_at    timestamptz not null default now(),
+  constraint fin_classes_perfil_fkey foreign key (perfil_id, user_id)
+    references public.fin_perfis (id, user_id) on delete cascade
+);
+create index if not exists fin_classes_perfil_idx on public.fin_classes (perfil_id, user_id);
+
+create table if not exists public.fin_regras (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete restrict,
+  perfil_id  uuid not null,
+  texto      text not null check (char_length(texto) between 2 and 120),
+  classe_id  uuid not null references public.fin_classes (id) on delete cascade,
+  escopo     text check (escopo in ('pessoal', 'empresa')),
+  created_at timestamptz not null default now(),
+  constraint fin_regras_perfil_fkey foreign key (perfil_id, user_id)
+    references public.fin_perfis (id, user_id) on delete cascade,
+  constraint fin_regras_texto_unico unique (user_id, perfil_id, texto)
+);
+create index if not exists fin_regras_classe_idx on public.fin_regras (classe_id);
+create index if not exists fin_regras_perfil_idx on public.fin_regras (perfil_id, user_id);
+
+alter table public.fin_lancamentos add column if not exists classe_id uuid
+  references public.fin_classes (id) on delete set null;
+create index if not exists fin_lancamentos_classe_idx on public.fin_lancamentos (classe_id);
+
+alter table public.fin_classes enable row level security;
+alter table public.fin_regras  enable row level security;
+revoke all on public.fin_classes, public.fin_regras from anon;
+create policy "fin classes do dono" on public.fin_classes for all to authenticated
+  using ((select auth.uid()) = user_id and (select public.fin_acesso()))
+  with check ((select auth.uid()) = user_id and (select public.fin_acesso()));
+create policy "fin regras do dono" on public.fin_regras for all to authenticated
+  using ((select auth.uid()) = user_id and (select public.fin_acesso()))
+  with check ((select auth.uid()) = user_id and (select public.fin_acesso()));

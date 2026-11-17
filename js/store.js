@@ -3,11 +3,14 @@
 //  - "local":    dados só neste navegador (testes: abrir o site com ?local).
 //
 // Formato em memória (igual nos dois modos):
-//   { perfis: [{id, nome, tipo: 'pessoal'|'empresa', cor, ordem}],
-//     categorias: [{id, perfil_id, nome, tipo: 'debito'|'credito', ordem, ativo}],
-//     meses: [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
-//     prefs: { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261117000336';
+//   { perfis:      [{id, nome, tipo, cor, ordem}],
+//     categorias:  [{id, perfil_id, nome, tipo: 'debito'|'credito', ordem, ativo}]      ← contas e cartões (de onde saiu)
+//     classes:     [{id, perfil_id, nome, cor, ordem, ativo, escopo_padrao}]           ← categorias de gasto (com o quê)
+//     regras:      [{id, perfil_id, texto, classe_id, escopo}]                         ← classificação automática
+//     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
+//     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
+//     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
+import { uid } from './util.js?v=20261117001941';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
@@ -19,13 +22,16 @@ export async function createStore() {
   return localStore();
 }
 
-/** Converte backups/dados antigos (sem perfis) para o formato com perfis. */
+/** Converte backups/dados antigos para o formato atual. */
 export function normalizarDados(data) {
+  const lista = (x) => (Array.isArray(x) ? x : []);
   const d = {
-    perfis: Array.isArray(data.perfis) ? data.perfis : [],
-    categorias: Array.isArray(data.categorias) ? data.categorias : [],
-    meses: Array.isArray(data.meses) ? data.meses : [],
-    lancamentos: Array.isArray(data.lancamentos) ? data.lancamentos : [],
+    perfis: lista(data.perfis),
+    categorias: lista(data.categorias),
+    classes: lista(data.classes),
+    regras: lista(data.regras),
+    meses: lista(data.meses),
+    lancamentos: lista(data.lancamentos),
     prefs: data.prefs && typeof data.prefs === 'object' ? data.prefs : {},
   };
   if (!d.perfis.length && (d.categorias.length || d.meses.length)) {
@@ -33,7 +39,6 @@ export function normalizarDados(data) {
     d.perfis = [p];
     d.categorias = d.categorias.map((c) => ({ ...c, perfil_id: c.perfil_id || p.id }));
     d.meses = d.meses.map((m) => ({ ...m, perfil_id: m.perfil_id || p.id }));
-    // prefs antigas eram um objeto único
     if ('pct_investir' in d.prefs) d.prefs = { [p.id]: { ...PREFS_PADRAO, ...d.prefs } };
   }
   return d;
@@ -43,17 +48,28 @@ export function normalizarDados(data) {
 function localStore() {
   const KEY = 'financas-local-v1';
   const read = () => {
-    try {
-      return normalizarDados(JSON.parse(localStorage.getItem(KEY)) || {});
-    } catch {
-      return normalizarDados({});
-    }
+    try { return normalizarDados(JSON.parse(localStorage.getItem(KEY)) || {}); } catch { return normalizarDados({}); }
   };
   const write = (db) => {
     try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { console.error(e); }
   };
   const user = { email: 'Modo local (só neste dispositivo)' };
   const mesmoMes = (m, perfilId, ano, mes) => m.perfil_id === perfilId && m.ano === ano && m.mes === mes;
+  /** Insere ou substitui um item (por id) numa lista do banco local. */
+  const upsert = (lista, item) => {
+    const db = read();
+    if (!item.id) item = { ...item, id: uid() };
+    const i = db[lista].findIndex((x) => x.id === item.id);
+    if (i >= 0) db[lista][i] = item; else db[lista].push(item);
+    write(db);
+    return item;
+  };
+  const remove = (lista, id) => {
+    const db = read();
+    db[lista] = db[lista].filter((x) => x.id !== id);
+    write(db);
+    return db;
+  };
 
   return {
     mode: 'local',
@@ -65,19 +81,12 @@ function localStore() {
     async resetPassword() {},
     async signOut() {},
     async load() { const db = read(); write(db); return db; },
-    async savePerfil(p) {
-      const db = read();
-      if (!p.id) p = { ...p, id: uid() };
-      const i = db.perfis.findIndex((x) => x.id === p.id);
-      if (i >= 0) db.perfis[i] = p; else db.perfis.push(p);
-      write(db);
-      return p;
-    },
+
+    async savePerfil(p) { return upsert('perfis', p); },
     async deletePerfil(id) {
       const db = read();
       db.perfis = db.perfis.filter((p) => p.id !== id);
-      db.categorias = db.categorias.filter((c) => c.perfil_id !== id);
-      db.meses = db.meses.filter((m) => m.perfil_id !== id);
+      for (const k of ['categorias', 'classes', 'regras', 'meses', 'lancamentos']) db[k] = db[k].filter((x) => x.perfil_id !== id);
       delete db.prefs[id];
       write(db);
     },
@@ -93,38 +102,17 @@ function localStore() {
       db.meses = db.meses.filter((m) => !mesmoMes(m, perfilId, ano, mes));
       write(db);
     },
-    async saveCategoria(cat) {
-      const db = read();
-      if (!cat.id) cat = { ...cat, id: uid() };
-      const i = db.categorias.findIndex((c) => c.id === cat.id);
-      if (i >= 0) db.categorias[i] = cat; else db.categorias.push(cat);
-      write(db);
-      return cat;
-    },
-    async deleteCategoria(id) {
-      const db = read();
-      db.categorias = db.categorias.filter((c) => c.id !== id);
-      write(db);
-    },
+    async saveCategoria(cat) { return upsert('categorias', cat); },
+    async deleteCategoria(id) { remove('categorias', id); },
     async savePrefs(perfilId, p) {
       const db = read();
       db.prefs[perfilId] = { ...PREFS_PADRAO, ...db.prefs[perfilId], ...p };
       write(db);
       return db.prefs[perfilId];
     },
-    async saveLancamento(l) {
-      const db = read();
-      if (!l.id) l = { ...l, id: uid() };
-      const i = db.lancamentos.findIndex((x) => x.id === l.id);
-      if (i >= 0) db.lancamentos[i] = l; else db.lancamentos.push(l);
-      write(db);
-      return l;
-    },
-    async deleteLancamento(id) {
-      const db = read();
-      db.lancamentos = db.lancamentos.filter((x) => x.id !== id);
-      write(db);
-    },
+
+    async saveLancamento(l) { return upsert('lancamentos', l); },
+    async deleteLancamento(id) { remove('lancamentos', id); },
     /** Insere vários; os que já existem (mesma chave) são ignorados. Devolve só os novos. */
     async importarLancamentos(lista) {
       const db = read();
@@ -140,9 +128,41 @@ function localStore() {
       write(db);
       return novos;
     },
-    async replaceAll(data) {
-      write(normalizarDados(data));
+    /** Muda os mesmos campos (ex.: categoria e lado) em vários lançamentos de uma vez. */
+    async atualizarLancamentos(ids, mudanca) {
+      const db = read();
+      const alvo = new Set(ids);
+      const out = [];
+      db.lancamentos = db.lancamentos.map((l) => {
+        if (!alvo.has(l.id)) return l;
+        const n = { ...l, ...mudanca };
+        out.push(n);
+        return n;
+      });
+      write(db);
+      return out;
     },
+
+    async saveClasse(c) { return upsert('classes', c); },
+    async deleteClasse(id) {
+      const db = read();
+      db.classes = db.classes.filter((x) => x.id !== id);
+      db.regras = db.regras.filter((r) => r.classe_id !== id);
+      db.lancamentos = db.lancamentos.map((l) => (l.classe_id === id ? { ...l, classe_id: null } : l));
+      write(db);
+    },
+    /** Regra por texto: se já existe uma com o mesmo texto, é substituída. */
+    async saveRegra(r) {
+      const db = read();
+      const i = db.regras.findIndex((x) => x.perfil_id === r.perfil_id && x.texto === r.texto);
+      const salvo = { ...(i >= 0 ? db.regras[i] : { id: uid() }), ...r };
+      if (i >= 0) db.regras[i] = salvo; else db.regras.push(salvo);
+      write(db);
+      return salvo;
+    },
+    async deleteRegra(id) { remove('regras', id); },
+
+    async replaceAll(data) { write(normalizarDados(data)); },
   };
 }
 
@@ -158,40 +178,33 @@ async function supabaseStore(cfg) {
   };
   const PERFIL_COLS = 'id, nome, tipo, cor, ordem';
   const CAT_COLS = 'id, perfil_id, nome, tipo, ordem, ativo';
+  const CLASSE_COLS = 'id, perfil_id, nome, cor, ordem, ativo, escopo_padrao';
+  const REGRA_COLS = 'id, perfil_id, texto, classe_id, escopo';
   const MES_COLS = 'perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao';
   const PREF_COLS = 'perfil_id, pct_investir, meses_reserva, pct_max_gasto';
-  const LANC_COLS = 'id, perfil_id, data, descricao, valor, destino, categoria_id, escopo, origem, conta, chave';
-  const limpaLanc = (l) => {
-    const row = {
-      perfil_id: l.perfil_id, data: l.data, descricao: String(l.descricao).slice(0, 200), valor: l.valor,
-      destino: l.destino, categoria_id: l.destino === 'despesa' ? l.categoria_id : null,
-      escopo: l.escopo || 'pessoal', origem: l.origem || 'manual', conta: l.conta || null, chave: l.chave || null,
-    };
-    if (l.id) row.id = l.id;
-    return row;
-  };
+  const LANC_COLS = 'id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave';
+
+  const comId = (row, x) => (x.id ? { ...row, id: x.id } : row);
+  const limpaLanc = (l) => comId({
+    perfil_id: l.perfil_id, data: l.data, descricao: String(l.descricao).slice(0, 200), valor: l.valor,
+    destino: l.destino, categoria_id: l.destino === 'despesa' ? l.categoria_id : null,
+    classe_id: l.classe_id || null,
+    escopo: l.escopo || 'pessoal', origem: l.origem || 'manual', conta: l.conta || null, chave: l.chave || null,
+  }, l);
   const numLanc = (l) => ({ ...l, valor: Number(l.valor) });
   const limpaMes = (r) => ({
-    perfil_id: r.perfil_id,
-    ano: r.ano, mes: r.mes,
-    receita: r.receita ?? null,
-    investimento: r.investimento ?? null,
-    rendimento: r.rendimento ?? null,
-    saldo_inicial: r.saldo_inicial ?? null,
-    despesas: r.despesas || {},
-    formulas: r.formulas || {},
+    perfil_id: r.perfil_id, ano: r.ano, mes: r.mes,
+    receita: r.receita ?? null, investimento: r.investimento ?? null, rendimento: r.rendimento ?? null,
+    saldo_inicial: r.saldo_inicial ?? null, despesas: r.despesas || {}, formulas: r.formulas || {},
     observacao: r.observacao || null,
   });
-  const limpaCat = (c) => {
-    const row = { perfil_id: c.perfil_id, nome: c.nome, tipo: c.tipo, ordem: c.ordem ?? 0, ativo: c.ativo ?? true };
-    if (c.id) row.id = c.id;
-    return row;
-  };
-  const limpaPerfil = (p) => {
-    const row = { nome: p.nome, tipo: p.tipo || 'pessoal', cor: p.cor || '#0f766e', ordem: p.ordem ?? 0 };
-    if (p.id) row.id = p.id;
-    return row;
-  };
+  const limpaCat = (c) => comId({ perfil_id: c.perfil_id, nome: c.nome, tipo: c.tipo, ordem: c.ordem ?? 0, ativo: c.ativo ?? true }, c);
+  const limpaClasse = (c) => comId({
+    perfil_id: c.perfil_id, nome: c.nome, cor: c.cor || '#64748b', ordem: c.ordem ?? 0,
+    ativo: c.ativo ?? true, escopo_padrao: c.escopo_padrao || null,
+  }, c);
+  const limpaRegra = (r) => comId({ perfil_id: r.perfil_id, texto: r.texto, classe_id: r.classe_id, escopo: r.escopo || null }, r);
+  const limpaPerfil = (p) => comId({ nome: p.nome, tipo: p.tipo || 'pessoal', cor: p.cor || '#0f766e', ordem: p.ordem ?? 0 }, p);
 
   return {
     mode: 'supabase',
@@ -220,9 +233,11 @@ async function supabaseStore(cfg) {
     },
 
     async load() {
-      const [perfis, cats, meses, prefs] = await Promise.all([
+      const [perfis, cats, classes, regras, meses, prefs] = await Promise.all([
         sb.from('fin_perfis').select(PERFIL_COLS).order('ordem'),
         sb.from('fin_categorias').select(CAT_COLS).order('ordem'),
+        sb.from('fin_classes').select(CLASSE_COLS).order('ordem'),
+        sb.from('fin_regras').select(REGRA_COLS),
         sb.from('fin_meses').select(MES_COLS).order('ano').order('mes'),
         sb.from('fin_preferencias').select(PREF_COLS),
       ]);
@@ -238,31 +253,17 @@ async function supabaseStore(cfg) {
         lancamentos.push(...pagina.map(numLanc));
         if (pagina.length < 1000) break;
       }
-      return { perfis: check(perfis), categorias: check(cats), meses: check(meses), lancamentos, prefs: prefsPorPerfil };
+      return {
+        perfis: check(perfis), categorias: check(cats), classes: check(classes), regras: check(regras),
+        meses: check(meses), lancamentos, prefs: prefsPorPerfil,
+      };
     },
-    async saveLancamento(l) {
-      return numLanc(check(await sb.from('fin_lancamentos').upsert(limpaLanc(l)).select(LANC_COLS).single()));
-    },
-    async deleteLancamento(id) {
-      check(await sb.from('fin_lancamentos').delete().eq('id', id));
-    },
-    /** Insere vários; os que já existem (mesma chave) são ignorados pelo banco. Devolve só os novos. */
-    async importarLancamentos(lista) {
-      const novos = [];
-      for (let i = 0; i < lista.length; i += 500) {
-        const parte = lista.slice(i, i + 500).map(limpaLanc);
-        const r = check(await sb.from('fin_lancamentos')
-          .upsert(parte, { onConflict: 'user_id,perfil_id,chave', ignoreDuplicates: true })
-          .select(LANC_COLS));
-        novos.push(...r.map(numLanc));
-      }
-      return novos;
-    },
+
     async savePerfil(p) {
       return check(await sb.from('fin_perfis').upsert(limpaPerfil(p)).select(PERFIL_COLS).single());
     },
     async deletePerfil(id) {
-      // Apaga em cascata as categorias, meses e preferências do perfil.
+      // Apaga em cascata tudo do perfil.
       check(await sb.from('fin_perfis').delete().eq('id', id));
     },
     async saveMes(rec) {
@@ -283,13 +284,57 @@ async function supabaseStore(cfg) {
       const { perfil_id: _id, ...resto } = salvo;
       return { ...PREFS_PADRAO, ...resto };
     },
+
+    async saveLancamento(l) {
+      return numLanc(check(await sb.from('fin_lancamentos').upsert(limpaLanc(l)).select(LANC_COLS).single()));
+    },
+    async deleteLancamento(id) {
+      check(await sb.from('fin_lancamentos').delete().eq('id', id));
+    },
+    /** Insere vários; os que já existem (mesma chave) são ignorados pelo banco. Devolve só os novos. */
+    async importarLancamentos(lista) {
+      const novos = [];
+      for (let i = 0; i < lista.length; i += 500) {
+        const parte = lista.slice(i, i + 500).map(limpaLanc);
+        const r = check(await sb.from('fin_lancamentos')
+          .upsert(parte, { onConflict: 'user_id,perfil_id,chave', ignoreDuplicates: true })
+          .select(LANC_COLS));
+        novos.push(...r.map(numLanc));
+      }
+      return novos;
+    },
+    /** Muda os mesmos campos (ex.: categoria e lado) em vários lançamentos de uma vez. */
+    async atualizarLancamentos(ids, mudanca) {
+      const out = [];
+      for (let i = 0; i < ids.length; i += 200) {
+        const r = check(await sb.from('fin_lancamentos').update(mudanca).in('id', ids.slice(i, i + 200)).select(LANC_COLS));
+        out.push(...r.map(numLanc));
+      }
+      return out;
+    },
+
+    async saveClasse(c) {
+      return check(await sb.from('fin_classes').upsert(limpaClasse(c)).select(CLASSE_COLS).single());
+    },
+    async deleteClasse(id) {
+      // Regras da categoria são apagadas; lançamentos ficam sem categoria.
+      check(await sb.from('fin_classes').delete().eq('id', id));
+    },
+    async saveRegra(r) {
+      return check(await sb.from('fin_regras').upsert(limpaRegra(r), { onConflict: 'user_id,perfil_id,texto' }).select(REGRA_COLS).single());
+    },
+    async deleteRegra(id) {
+      check(await sb.from('fin_regras').delete().eq('id', id));
+    },
+
     async replaceAll(data) {
-      // Restauração de backup: substitui tudo do usuário logado.
-      // Apagar os perfis apaga em cascata categorias, meses e preferências.
+      // Restauração de backup: substitui tudo do usuário logado (apagar perfis apaga o resto em cascata).
       const d = normalizarDados(data);
       check(await sb.from('fin_perfis').delete().not('id', 'is', null));
       if (d.perfis.length) check(await sb.from('fin_perfis').insert(d.perfis.map(limpaPerfil)));
       if (d.categorias.length) check(await sb.from('fin_categorias').insert(d.categorias.map(limpaCat)));
+      if (d.classes.length) check(await sb.from('fin_classes').insert(d.classes.map(limpaClasse)));
+      if (d.regras.length) check(await sb.from('fin_regras').insert(d.regras.map(limpaRegra)));
       if (d.meses.length) check(await sb.from('fin_meses').insert(d.meses.map(limpaMes)));
       for (let i = 0; i < d.lancamentos.length; i += 500) {
         check(await sb.from('fin_lancamentos').insert(d.lancamentos.slice(i, i + 500).map(limpaLanc)));

@@ -1,8 +1,9 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117000336';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117000336';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117000336';
-import { lerPlanilha } from './importer.js?v=20261117000336';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117000336';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261117001941';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117001941';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117001941';
+import { lerPlanilha } from './importer.js?v=20261117001941';
+import { lerExtrato, normDesc } from './extrato.js?v=20261117001941';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir } from './classes.js?v=20261117001941';
 
 const app = document.getElementById('app');
 const S = {
@@ -49,7 +50,47 @@ const cats = () => [...S.data.categorias].sort((a, b) => (a.ordem ?? 0) - (b.ord
 const anoAtual = () => new Date().getFullYear();
 
 function dadosVazios() {
-  return { perfis: [], categorias: [], meses: [], lancamentos: [], prefs: {} };
+  return { perfis: [], categorias: [], classes: [], regras: [], meses: [], lancamentos: [], prefs: {} };
+}
+/** Categorias de gasto (Funcionários, Assinaturas...) em ordem. */
+const classes = () => [...S.data.classes].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0) || a.nome.localeCompare(b.nome));
+const classePorId = (id) => S.data.classes.find((c) => c.id === id);
+const LADO = { pessoal: 'Pessoal', empresa: 'Empresa' };
+/** Despesas ainda sem categoria de gasto. */
+const semClasse = (lista) => lista.filter((l) => l.destino === 'despesa' && !l.classe_id);
+
+/** Cria as categorias sugeridas (Funcionários, Fornecedores, Mercado...). */
+async function criarClassesSugeridas() {
+  const existentes = new Set(S.data.classes.map((c) => normDesc(c.nome)));
+  let ordem = S.data.classes.length;
+  for (const [nome, cor, escopo_padrao] of CLASSES_SUGERIDAS) {
+    if (existentes.has(normDesc(nome))) continue;
+    S.data.classes.push(await S.store.saveClasse({ perfil_id: S.perfilId, nome, cor, escopo_padrao, ordem: ++ordem, ativo: true }));
+  }
+}
+
+/** Aplica uma categoria (e o lado) a vários lançamentos; se pedido, cria a regra para as próximas vezes. */
+async function classificar(ids, classeId, ladoEscolhido, textoRegra) {
+  const classe = classePorId(classeId);
+  const porLado = new Map();
+  for (const id of ids) {
+    const l = S.data.lancamentos.find((x) => x.id === id);
+    const lado = ladoEscolhido || classe?.escopo_padrao || l?.escopo || 'pessoal';
+    if (!porLado.has(lado)) porLado.set(lado, []);
+    porLado.get(lado).push(id);
+  }
+  for (const [lado, grupo] of porLado) {
+    const salvos = await S.store.atualizarLancamentos(grupo, { classe_id: classeId, escopo: lado });
+    for (const s of salvos) {
+      const i = S.data.lancamentos.findIndex((x) => x.id === s.id);
+      if (i >= 0) S.data.lancamentos[i] = { ...S.data.lancamentos[i], ...s };
+    }
+  }
+  if (textoRegra && textoRegra.length >= 2) {
+    const regra = await S.store.saveRegra({ perfil_id: S.perfilId, texto: textoRegra, classe_id: classeId, escopo: ladoEscolhido || null });
+    const i = S.data.regras.findIndex((r) => r.texto === regra.texto);
+    if (i >= 0) S.data.regras[i] = regra; else S.data.regras.push(regra);
+  }
 }
 /** Meses com os lançamentos já somados (é isso que as telas mostram). */
 function efetivos() {
@@ -76,10 +117,14 @@ function rota() {
   if (h[0] === 'ajuda') return { view: 'ajuda' };
   if (h[0] === 'geral') return { view: 'geral' };
   const ano = Number(h[1]), mes = Number(h[2]);
-  if (h[0] === 'lancamentos') {
-    if (ano && mes >= 1 && mes <= 12) return { view: 'lancamentos', ano, mes };
-    const d = new Date();
-    return { view: 'lancamentos', ano: d.getFullYear(), mes: d.getMonth() + 1 };
+  if (h[0] === 'lancamentos' || h[0] === 'classificar') {
+    if (ano && mes >= 1 && mes <= 12) return { view: h[0], ano, mes };
+    return { view: h[0], ...mesPadrao() };
+  }
+  if (h[0] === 'categorias') {
+    if (ano && !h[2]) return { view: 'categorias', ano, mes: null };
+    if (ano && mes >= 1 && mes <= 12) return { view: 'categorias', ano, mes };
+    return { view: 'categorias', ...mesPadrao() };
   }
   if (h[0] === 'mes' && ano && mes >= 1 && mes <= 12) return { view: 'mes', ano, mes };
   return { view: 'mes', ...mesPadrao() };
@@ -168,6 +213,8 @@ function render() {
   const main = app.querySelector('main');
   if (r.view === 'mes') renderMes(main, r.ano, r.mes);
   else if (r.view === 'lancamentos') renderLancamentos(main, r.ano, r.mes);
+  else if (r.view === 'classificar') renderClassificar(main, r.ano, r.mes);
+  else if (r.view === 'categorias') renderCategorias(main, r.ano, r.mes);
   else if (r.view === 'geral') renderGeral(main);
   else if (r.view === 'ano') renderAno(main, r.ano, r.aba);
   else if (r.view === 'ajuda') renderAjuda(main);
@@ -182,9 +229,12 @@ function render() {
 }
 
 function shell(r) {
-  const item = (href, view, label, icon) =>
-    `<a href="${href}" class="${r.view === view ? 'ativo' : ''}" ${r.view === view ? 'aria-current="page"' : ''}>${icon}<span>${label}</span></a>`;
-  const ano = r.view === 'ano' || r.view === 'mes' ? r.ano : anoAtual();
+  const item = (href, view, label, icon, extra = '', classe = '') =>
+    `<a href="${href}" class="${r.view === view ? 'ativo' : ''} ${classe}" ${r.view === view ? 'aria-current="page"' : ''}>${icon}<span>${label}</span>${extra}</a>`;
+  const ano = r.ano || anoAtual();
+  // Telas por mês mantêm o mês aberto ao trocar de tela
+  const sufixoMes = r.ano && r.mes ? `/${r.ano}/${r.mes}` : '';
+  const pendentes = semClasse(S.data.lancamentos).length;
   const email = S.user?.email || '';
   const marca = '<div class="marca"><img src="icons/icon.svg" alt="" width="30" height="30"><span>Finanças Marques</span></div>';
   return `
@@ -192,14 +242,17 @@ function shell(r) {
     <aside class="lateral">
       ${marca}
       <nav class="nav" aria-label="Menu">
-        <span class="nav-titulo">Menu</span>
-        ${item('#/mes', 'mes', 'Mês', ICON.mes)}
-        ${item(r.view === 'mes' || r.view === 'lancamentos' ? `#/lancamentos/${r.ano}/${r.mes}` : '#/lancamentos', 'lancamentos', 'Lançamentos', ICON.lista)}
+        <span class="nav-titulo">Mês a mês</span>
+        ${item(`#/mes${sufixoMes}`, 'mes', 'Visão do mês', ICON.mes)}
+        ${item(`#/lancamentos${sufixoMes}`, 'lancamentos', 'Lançamentos', ICON.lista)}
+        ${item(`#/classificar${sufixoMes}`, 'classificar', 'Classificar', ICON.classificar, pendentes ? `<b class="badge">${pendentes > 99 ? '99+' : pendentes}</b>` : '')}
+        ${item(`#/categorias${sufixoMes}`, 'categorias', 'Categorias', ICON.categorias)}
+        <span class="nav-titulo nav-sep">Análise</span>
         ${item(`#/ano/${ano}`, 'ano', 'Ano', ICON.ano)}
-        ${item('#/geral', 'geral', 'Todos os anos', ICON.geral)}
+        ${item('#/geral', 'geral', 'Todos os anos', ICON.geral, '', 'so-desktop')}
         <span class="nav-titulo nav-sep">Configurar</span>
         ${item('#/ajustes', 'ajustes', 'Ajustes', ICON.ajustes)}
-        ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda)}
+        ${item('#/ajuda', 'ajuda', 'Ajuda', ICON.ajuda, '', 'so-desktop')}
       </nav>
       ${seletorTema()}
       <div class="lateral-pe">
@@ -486,6 +539,30 @@ function renderMes(main, ano, mes) {
       </section>
 
       ${(() => {
+        // Gastos por categoria de gasto + pessoal × empresa (vem dos lançamentos)
+        const gastos = S.data.lancamentos.filter((x) => x.destino === 'despesa' && String(x.data).startsWith(`${ano}-${pad2(mes)}`));
+        if (!gastos.length) return '';
+        const tot = gastos.reduce((s, x) => s + x.valor, 0);
+        const emp = gastos.filter((x) => x.escopo === 'empresa').reduce((s, x) => s + x.valor, 0);
+        const porClasse = new Map();
+        for (const x of gastos) porClasse.set(x.classe_id || '', (porClasse.get(x.classe_id || '') || 0) + x.valor);
+        const top = [...porClasse.entries()].filter(([id]) => id).sort((a, b) => b[1] - a[1]).slice(0, 6);
+        const pend = semClasse(gastos).length;
+        const pctEmp = tot ? (emp / tot) * 100 : 0;
+        return `<section class="card">
+          <h2>Gastos por categoria</h2>
+          <div class="divisao" title="Pessoal × empresa">
+            <div class="divisao-barra"><span style="width:${100 - pctEmp}%"></span><span class="emp" style="width:${pctEmp}%"></span></div>
+            <div class="divisao-leg"><span>Pessoal <b>${fmtBRL(tot - emp)}</b></span><span>Empresa <b>${fmtBRL(emp)}</b></span></div>
+          </div>
+          ${top.map(([id, v]) => { const c = classePorId(id); return `<div class="linha-cat"><span class="dot" style="background:${c?.cor}"></span>
+            <div class="nome">${esc(c?.nome || '')}</div><div class="val"><strong>${fmtBRL(v)}</strong><span class="delta">${Math.round((v / tot) * 100)}%</span></div></div>`; }).join('')}
+          ${pend ? `<p class="hint aviso-txt">${pend} ${pend === 1 ? 'gasto' : 'gastos'} sem categoria. <a href="#/classificar/${ano}/${mes}">Classificar agora →</a></p>` : ''}
+          <div class="linha-total"><a href="#/categorias/${ano}/${mes}">Ver todas as categorias →</a></div>
+        </section>`;
+      })()}
+
+      ${(() => {
         const doMes = S.data.lancamentos.filter((x) => String(x.data).startsWith(`${ano}-${pad2(mes)}`))
           .sort((a, b) => b.data.localeCompare(a.data)).slice(0, 6);
         if (!doMes.length) return '';
@@ -569,7 +646,8 @@ function renderLancamentos(main, ano, mes) {
   const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
   const lista = doMes
     .filter((l) => fl.escopo === 'todos' || l.escopo === fl.escopo)
-    .filter((l) => !fl.cat || (fl.cat.startsWith('d:') ? l.destino === fl.cat.slice(2) : l.categoria_id === fl.cat))
+    .filter((l) => !fl.cat || (fl.cat.startsWith('d:') ? l.destino === fl.cat.slice(2)
+      : fl.cat.startsWith('c:') ? (l.destino === 'despesa' && (l.classe_id || '') === fl.cat.slice(2)) : l.categoria_id === fl.cat))
     .filter((l) => !fl.busca || normDesc(l.descricao).includes(normDesc(fl.busca)))
     .sort((a, b) => a.data.localeCompare(b.data) || a.descricao.localeCompare(b.descricao));
   const soma = (arr, f) => arr.filter(f).reduce((s, l) => s + l.valor, 0);
@@ -583,12 +661,15 @@ function renderLancamentos(main, ano, mes) {
 
   const linha = (l) => {
     const cat = catPorId.get(l.categoria_id);
+    const classe = classePorId(l.classe_id);
     const entrada = l.destino === 'receita' || l.destino === 'rendimento';
-    const cor = cat ? corCat(cat) : entrada ? 'var(--pos)' : 'var(--c-saldo)';
+    const cor = classe ? classe.cor : cat ? corCat(cat) : entrada ? 'var(--pos)' : 'var(--c-saldo)';
+    const rotuloClasse = l.destino !== 'despesa' ? DESTINOS[l.destino]
+      : classe ? esc(classe.nome) : '<span class="tag aviso">sem categoria</span>';
     return `<button class="lanc" data-id="${l.id}">
       <span class="lanc-icone" style="--cor:${cor}">${entrada ? '↓' : l.destino === 'investimento' ? '◆' : '↑'}</span>
       <span class="lanc-txt"><b>${esc(l.descricao)}</b>
-        <small>${cat ? esc(cat.nome) : DESTINOS[l.destino]}${l.escopo === 'empresa' ? ' · <span class="tag empresa">Empresa</span>' : ''}${l.origem === 'extrato' ? ' · <span class="tag">extrato</span>' : ''}</small></span>
+        <small>${rotuloClasse}${cat ? ` · ${esc(cat.nome)}` : ''} · <span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo] || 'Pessoal'}</span>${l.origem === 'extrato' ? ' · <span class="tag">extrato</span>' : ''}</small></span>
       <span class="lanc-valor ${entrada ? 'pos' : l.destino === 'despesa' ? 'neg' : ''}">${entrada ? '+' : '−'} ${fmtBRL(l.valor)}</span>
     </button>`;
   };
@@ -614,9 +695,17 @@ function renderLancamentos(main, ano, mes) {
             `<button data-escopo="${v}" class="${fl.escopo === v ? 'ativo' : ''}" aria-pressed="${fl.escopo === v}">${t}</button>`).join('')}
         </div>
         <select data-f="cat" aria-label="Categoria">
-          <option value="">Todas as categorias</option>
-          ${cats().map((c) => `<option value="${c.id}" ${fl.cat === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
-          ${['receita', 'rendimento', 'investimento'].map((d) => `<option value="d:${d}" ${fl.cat === 'd:' + d ? 'selected' : ''}>${DESTINOS[d]}</option>`).join('')}
+          <option value="">Tudo</option>
+          <optgroup label="Categoria de gasto">
+            <option value="c:" ${fl.cat === 'c:' ? 'selected' : ''}>Sem categoria</option>
+            ${classes().map((c) => `<option value="c:${c.id}" ${fl.cat === 'c:' + c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Conta / cartão">
+            ${cats().map((c) => `<option value="${c.id}" ${fl.cat === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
+          </optgroup>
+          <optgroup label="Entradas">
+            ${['receita', 'rendimento', 'investimento'].map((d) => `<option value="d:${d}" ${fl.cat === 'd:' + d ? 'selected' : ''}>${DESTINOS[d]}</option>`).join('')}
+          </optgroup>
         </select>
         <input type="search" data-f="busca" placeholder="Buscar descrição…" value="${esc(fl.busca)}" aria-label="Buscar">
         <span class="contagem">${lista.length} de ${doMes.length}</span>
@@ -685,9 +774,17 @@ function abrirLancamento(existente, { ano, mes }) {
         </div>
         <label class="campo"><span>Descrição</span><input name="descricao" list="lista-descricoes" maxlength="200" autocomplete="off" placeholder="Ex.: Mercado, Pix João (salário), Fatura..." value="${esc(existente?.descricao || '')}" required></label>
         <datalist id="lista-descricoes">${descricoes.map((d) => `<option value="${esc(d)}">`).join('')}</datalist>
-        <label class="campo" data-so-despesa><span>Cartão / categoria</span>
-          <select name="categoria_id">${c.map((x) => `<option value="${x.id}" ${existente?.categoria_id === x.id ? 'selected' : ''}>${esc(x.nome)} (${x.tipo === 'debito' ? 'débito' : 'crédito'})</option>`).join('')}</select>
-        </label>
+        <div class="campos-2" data-so-despesa>
+          <label class="campo"><span>Saiu de qual conta/cartão</span>
+            <select name="categoria_id">${c.map((x) => `<option value="${x.id}" ${existente?.categoria_id === x.id ? 'selected' : ''}>${esc(x.nome)} (${x.tipo === 'debito' ? 'débito' : 'crédito'})</option>`).join('')}</select>
+          </label>
+          <label class="campo"><span>Categoria de gasto</span>
+            <select name="classe_id"><option value="">— sem categoria —</option>
+              ${classes().filter((x) => x.ativo !== false || x.id === existente?.classe_id).map((x) => `<option value="${x.id}" ${existente?.classe_id === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select>
+          </label>
+        </div>
+        <label class="check-linha" data-so-despesa><input type="checkbox" name="lembrar"> Criar regra: classificar sempre assim quando a descrição tiver
+          <input class="regra-texto" name="texto_regra" value="${esc(textoBase(existente?.descricao || ''))}" aria-label="Texto da regra"></label>
         <div class="campo"><span>Este gasto é</span>
           <div class="seg" role="radiogroup" aria-label="Pessoal ou empresa">
             ${[['pessoal', 'Pessoal'], ['empresa', 'Da empresa']].map(([v, t]) => `<label><input type="radio" name="escopo" value="${v}" ${(existente?.escopo || 'pessoal') === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}
@@ -709,20 +806,31 @@ function abrirLancamento(existente, { ano, mes }) {
   const fechar = () => { dlg.close(); dlg.remove(); };
   const atualizarTipo = () => {
     const d = form.destino.value;
-    dlg.querySelector('[data-so-despesa]').hidden = d !== 'despesa';
+    dlg.querySelectorAll('[data-so-despesa]').forEach((x) => { x.hidden = d !== 'despesa'; });
   };
   form.addEventListener('change', atualizarTipo);
   atualizarTipo();
+  // Escolher a categoria já ajusta o lado (ex.: Funcionários → Empresa)
+  form.classe_id.addEventListener('change', () => {
+    const lado = classePorId(form.classe_id.value)?.escopo_padrao;
+    if (lado) form.querySelector(`[name="escopo"][value="${lado}"]`).checked = true;
+  });
   form.valor.addEventListener('input', () => {
     const prev = form.valor.parentElement.querySelector('.calc-preview');
     try { const r = parseExpr(form.valor.value); prev.textContent = r.formula ? `= ${fmtBRL(r.value)}` : ''; form.valor.classList.remove('invalido'); }
     catch (e) { prev.textContent = e.message; form.valor.classList.add('invalido'); }
   });
-  // Ao escolher uma descrição já usada, sugere a mesma categoria
+  // Ao digitar uma descrição conhecida, sugere conta, categoria e lado (pelas regras ou pela última vez)
   form.descricao.addEventListener('change', () => {
+    form.texto_regra.value = textoBase(form.descricao.value);
     if (existente) return;
-    const sug = categoriaPorHistorico(form.descricao.value);
-    if (sug && form.categoria_id.querySelector(`option[value="${sug}"]`)) form.categoria_id.value = sug;
+    const conta = categoriaPorHistorico(form.descricao.value);
+    if (conta && form.categoria_id.querySelector(`option[value="${conta}"]`)) form.categoria_id.value = conta;
+    const sug = sugerir(form.descricao.value, { regras: S.data.regras, classes: S.data.classes, lancamentos: S.data.lancamentos, escopoPadrao: form.escopo.value });
+    if (sug.classe_id && form.classe_id.querySelector(`option[value="${sug.classe_id}"]`)) {
+      form.classe_id.value = sug.classe_id;
+      form.querySelector(`[name="escopo"][value="${sug.escopo}"]`).checked = true;
+    }
   });
 
   async function salvar() {
@@ -737,6 +845,7 @@ function abrirLancamento(existente, { ano, mes }) {
       valor,
       destino,
       categoria_id: destino === 'despesa' ? form.categoria_id.value : null,
+      classe_id: destino === 'despesa' ? form.classe_id.value || null : null,
       escopo: form.escopo.value,
       origem: existente?.origem || 'manual',
     };
@@ -754,6 +863,12 @@ function abrirLancamento(existente, { ano, mes }) {
       const salvo = await S.store.saveLancamento(l);
       const i = S.data.lancamentos.findIndex((x) => x.id === salvo.id);
       if (i >= 0) S.data.lancamentos[i] = salvo; else S.data.lancamentos.push(salvo);
+      const texto = normDesc(form.texto_regra.value).trim();
+      if (form.lembrar.checked && l.classe_id && texto.length >= 2) {
+        const regra = await S.store.saveRegra({ perfil_id: S.perfilId, texto, classe_id: l.classe_id, escopo: l.escopo });
+        const j = S.data.regras.findIndex((r) => r.texto === regra.texto);
+        if (j >= 0) S.data.regras[j] = regra; else S.data.regras.push(regra);
+      }
       toast('Lançamento salvo.');
       return true;
     } catch (e) { toast('Erro ao salvar: ' + e.message, 'erro'); return false; }
@@ -804,13 +919,13 @@ function abrirImportacao({ ano, mes }) {
           <label class="campo"><span>Arquivo do extrato</span><input type="file" name="arquivo" accept=".ofx,.csv,.txt" required></label>
           <label class="campo"><span>Este extrato é de qual conta/cartão?</span>
             <select name="categoria">${c.map((x) => `<option value="${x.id}" ${cfg.categoria === x.id ? 'selected' : ''}>${esc(x.nome)} (${x.tipo === 'debito' ? 'débito' : 'crédito'})</option>`).join('')}</select>
-            <small class="hint">Os gastos vão para essa categoria. Gastos com descrição já conhecida usam a categoria da última vez.</small>
+            <small class="hint">Importe um arquivo por conta ou cartão (ex.: conta da empresa, cartão da empresa, conta pessoal).</small>
           </label>
-          <div class="campo"><span>Os gastos deste extrato são</span>
+          <div class="campo"><span>Quando não der para saber, o gasto é</span>
             <div class="seg" role="radiogroup">
-              ${[['pessoal', 'Pessoais'], ['empresa', 'Da empresa']].map(([v, t]) => `<label><input type="radio" name="escopo" value="${v}" ${cfg.escopo === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}
+              ${[['pessoal', 'Pessoal'], ['empresa', 'Da empresa']].map(([v, t]) => `<label><input type="radio" name="escopo" value="${v}" ${cfg.escopo === v ? 'checked' : ''}><span>${t}</span></label>`).join('')}
             </div>
-            <small class="hint">Dá para mudar linha por linha na próxima tela (ex.: gasto da empresa no cartão pessoal).</small>
+            <small class="hint">A separação é compra por compra: as regras e a categoria (ex.: Funcionários = empresa) decidem primeiro. Você confere na próxima tela.</small>
           </div>
           <p class="erro-msg" hidden></p>
         </div>
@@ -844,19 +959,27 @@ function abrirImportacao({ ano, mes }) {
       else if (S.data.lancamentos.some((x) => x.data === l.data && Math.abs(x.valor - Math.abs(valor)) < 0.005
         && (normDesc(x.descricao).slice(0, 10) === normDesc(l.descricao).slice(0, 10) || x.origem === 'manual'))) status = 'parece';
       const saida = valor < 0;
-      const sug = saida ? categoriaPorHistorico(l.descricao) : null;
+      // Categoria de gasto e lado: regra → histórico → padrão do arquivo
+      const sug = sugerir(l.descricao, { regras: S.data.regras, classes: S.data.classes, lancamentos: S.data.lancamentos, escopoPadrao: cfg.escopo });
+      const classeId = l.classeEscolhida !== undefined ? l.classeEscolhida : saida ? sug.classe_id : null;
+      const ladoClasse = classePorId(classeId)?.escopo_padrao;
       return {
         i, ...l, valor: Math.abs(valor), saida, status,
         incluir: l.incluir ?? status === 'novo',
         destino: l.destinoEscolhido ?? (saida ? 'despesa' : catPadrao?.tipo === 'credito' ? 'ignorar' : 'receita'),
-        categoria_id: l.catEscolhida ?? (sug || cfg.categoria),
-        escopo: l.escopoEscolhido ?? cfg.escopo,
+        categoria_id: cfg.categoria,
+        classe_id: classeId,
+        escopo: l.escopoEscolhido ?? (l.classeEscolhida !== undefined && ladoClasse ? ladoClasse : saida ? sug.escopo : cfg.escopo),
+        por: l.classeEscolhida !== undefined ? null : saida ? sug.por : null,
       };
     });
     const datas = linhas.map((l) => l.data).sort();
     const n = (s) => linhas.filter((l) => l.status === s).length;
-    const opcoesCat = (sel) => c.map((x) => `<option value="${x.id}" ${sel === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('');
+    const opcoesClasse = (sel) => `<option value="">— classificar depois —</option>` +
+      classes().filter((x) => x.ativo !== false || x.id === sel).map((x) => `<option value="${x.id}" ${sel === x.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('');
     const selecionadas = linhas.filter((l) => l.incluir && l.status !== 'ja' && l.destino !== 'ignorar');
+    const autoClass = selecionadas.filter((l) => l.destino === 'despesa' && l.classe_id).length;
+    const semCat = selecionadas.filter((l) => l.destino === 'despesa' && !l.classe_id).length;
 
     dlg.innerHTML = `
       <form>
@@ -867,12 +990,15 @@ function abrirImportacao({ ano, mes }) {
             <span class="tag pos">${n('novo')} novas</span>
             <span class="tag">${n('ja')} já importadas (serão puladas)</span>
             ${n('parece') ? `<span class="tag aviso">${n('parece')} parecem repetidas (desmarcadas — confira)</span>` : ''}
+            ${autoClass ? `<span class="tag pos">${autoClass} já com categoria</span>` : ''}
+            ${semCat ? `<span class="tag">${semCat} para classificar depois</span>` : ''}
           </div>
+          ${!S.data.classes.length ? '<p class="hint">Dica: crie as categorias de gasto (Funcionários, Assinaturas…) em Ajustes ou na tela Classificar. Dá para importar agora e classificar depois.</p>' : ''}
           <label class="check-linha"><input type="checkbox" name="inverter" ${cfg.inverter ? 'checked' : ''}>
             Inverter sinais <small class="sub">(marque se as compras aparecerem como entrada)</small></label>
           <div class="tabela-wrap">
             <table class="tabela import">
-              <thead><tr><th></th><th>Data</th><th>Descrição</th><th>Valor</th><th>Tipo</th><th>Categoria</th><th>Pessoal / empresa</th></tr></thead>
+              <thead><tr><th></th><th>Data</th><th>Descrição</th><th>Valor</th><th>Tipo</th><th>Categoria de gasto</th><th>Pessoal / empresa</th></tr></thead>
               <tbody>
                 ${linhas.map((l) => `
                   <tr data-i="${l.i}" class="${l.status}">
@@ -883,7 +1009,8 @@ function abrirImportacao({ ano, mes }) {
                     <td><select data-c="destino" ${l.status === 'ja' ? 'disabled' : ''}>
                       ${[['despesa', 'Despesa'], ['receita', 'Receita'], ['rendimento', 'Rendim./outras'], ['investimento', 'Investimento'], ['ignorar', 'Ignorar']]
                         .map(([v, t]) => `<option value="${v}" ${l.destino === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
-                    <td><select data-c="categoria" ${l.status === 'ja' || l.destino !== 'despesa' ? 'disabled' : ''}>${opcoesCat(l.categoria_id)}</select></td>
+                    <td><select data-c="classe" ${l.status === 'ja' || l.destino !== 'despesa' ? 'disabled' : ''}>${opcoesClasse(l.classe_id)}</select>
+                      ${l.por === 'regra' ? '<span class="tag pos" title="Classificado por uma regra">regra</span>' : l.por === 'historico' ? '<span class="tag" title="Igual a um lançamento anterior">anterior</span>' : ''}</td>
                     <td><select data-c="escopo" ${l.status === 'ja' ? 'disabled' : ''}>
                       <option value="pessoal" ${l.escopo === 'pessoal' ? 'selected' : ''}>Pessoal</option>
                       <option value="empresa" ${l.escopo === 'empresa' ? 'selected' : ''}>Empresa</option></select></td>
@@ -908,12 +1035,12 @@ function abrirImportacao({ ano, mes }) {
       const l = orig(Number(tr.dataset.i));
       tr.querySelector('[data-c="incluir"]').addEventListener('change', (e) => { l.incluir = e.target.checked; passo2(); });
       tr.querySelector('[data-c="destino"]').addEventListener('change', (e) => { l.destinoEscolhido = e.target.value; passo2(); });
-      tr.querySelector('[data-c="categoria"]').addEventListener('change', (e) => { l.catEscolhida = e.target.value; });
+      tr.querySelector('[data-c="classe"]').addEventListener('change', (e) => { l.classeEscolhida = e.target.value || null; passo2(); });
       tr.querySelector('[data-c="escopo"]').addEventListener('change', (e) => { l.escopoEscolhido = e.target.value; });
     });
     form.inverter.addEventListener('change', (e) => {
       cfg.inverter = e.target.checked;
-      lido.linhas.forEach((l) => { delete l.destinoEscolhido; delete l.catEscolhida; });
+      lido.linhas.forEach((l) => { delete l.destinoEscolhido; delete l.classeEscolhida; });
       passo2();
     });
     form.querySelector('[data-a="voltar"]').addEventListener('click', passo1);
@@ -921,12 +1048,14 @@ function abrirImportacao({ ano, mes }) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       // Lê de novo os selects (categoria/escopo mudam sem redesenhar)
-      const atuais = linhas.map((l) => ({ ...l, categoria_id: orig(l.i).catEscolhida ?? l.categoria_id, escopo: orig(l.i).escopoEscolhido ?? l.escopo }))
+      const atuais = linhas.map((l) => ({ ...l, escopo: orig(l.i).escopoEscolhido ?? l.escopo }))
         .filter((l) => l.incluir && l.status !== 'ja' && l.destino !== 'ignorar');
+      const nomeConta = S.data.categorias.find((x) => x.id === cfg.categoria)?.nome || lido.conta;
       const novos = atuais.map((l) => ({
         perfil_id: S.perfilId, data: l.data, descricao: l.descricao.slice(0, 200), valor: Math.round(l.valor * 100) / 100,
         destino: l.destino, categoria_id: l.destino === 'despesa' ? l.categoria_id : null,
-        escopo: l.escopo, origem: 'extrato', conta: lido.conta, chave: l.chave,
+        classe_id: l.destino === 'despesa' ? l.classe_id || null : null,
+        escopo: l.escopo, origem: 'extrato', conta: nomeConta, chave: l.chave,
       }));
       // Avisa se algum mês já tinha total digitado nesses campos
       const afetados = new Set();
@@ -943,9 +1072,12 @@ function abrirImportacao({ ano, mes }) {
         const inseridos = await S.store.importarLancamentos(novos);
         S.data.lancamentos.push(...inseridos);
         const pulados = linhas.length - inseridos.length;
-        toast(`${inseridos.length} importados${pulados ? ` · ${pulados} pulados (repetidos ou ignorados)` : ''}.`);
+        const paraClassificar = semClasse(inseridos).length;
+        toast(`${inseridos.length} importados${pulados ? ` · ${pulados} pulados (repetidos ou ignorados)` : ''}${paraClassificar ? ` · ${paraClassificar} para classificar` : ''}.`);
         fechar();
-        render();
+        // Leva direto para classificar o que ficou sem categoria
+        const [a, m] = (inseridos[0]?.data || `${ano}-${mes}`).split('-').map(Number);
+        if (paraClassificar) location.hash = `#/classificar/${a}/${m}`; else render();
       } catch (ex) {
         toast('Erro ao importar: ' + ex.message, 'erro');
         btn.disabled = false;
@@ -957,6 +1089,261 @@ function abrirImportacao({ ano, mes }) {
   dlg.addEventListener('cancel', (e) => { e.preventDefault(); fechar(); });
   passo1();
   dlg.showModal();
+}
+
+/* ========================================================= classificar */
+function cardSemClasses() {
+  return `<section class="card destaque-acao">
+    <h2>Crie as categorias de gasto</h2>
+    <p class="sub">Categorias dizem <b>com o quê</b> o dinheiro foi gasto (Funcionários, Assinaturas, Telefone…), independente da conta.
+      Comece com as sugeridas e ajuste depois em Ajustes.</p>
+    <div class="acoes"><button class="btn primario" data-a="sugeridas">Criar categorias sugeridas</button><a class="btn" href="#/ajustes">Criar as minhas</a></div>
+  </section>`;
+}
+function bindSemClasses(main) {
+  main.querySelector('[data-a="sugeridas"]')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try { await criarClassesSugeridas(); toast('Categorias criadas.'); render(); } catch (ex) { toast(ex.message, 'erro'); e.target.disabled = false; }
+  });
+}
+
+function renderClassificar(main, ano, mes) {
+  const prefixo = `${ano}-${pad2(mes)}`;
+  const despesasMes = S.data.lancamentos.filter((l) => String(l.data).startsWith(prefixo) && l.destino === 'despesa');
+  const pend = semClasse(despesasMes);
+  const feitos = despesasMes.length - pend.length;
+  const pct = despesasMes.length ? Math.round((feitos / despesasMes.length) * 100) : 0;
+  const outros = new Map();
+  for (const l of semClasse(S.data.lancamentos)) {
+    const k = l.data.slice(0, 7);
+    if (k !== prefixo) outros.set(k, (outros.get(k) || 0) + 1);
+  }
+  // Agrupa compras parecidas (mesma descrição sem números): um clique classifica o grupo todo
+  const mapa = new Map();
+  for (const l of pend) {
+    const b = textoBase(l.descricao) || normDesc(l.descricao) || 'sem descricao';
+    if (!mapa.has(b)) mapa.set(b, []);
+    mapa.get(b).push(l);
+  }
+  const grupos = [...mapa.entries()]
+    .map(([base, ls]) => ({ base, ls, total: ls.reduce((s, l) => s + l.valor, 0) }))
+    .sort((a, b) => b.total - a.total);
+  const cl = classes().filter((c) => c.ativo !== false);
+  const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
+
+  main.innerHTML = `
+    ${cabecalhoMes(ano, mes, '#/classificar', `
+      <button class="btn" data-a="aplicar-regras" title="Usa as regras salvas nos lançamentos ainda sem categoria">Aplicar regras</button>
+      <a class="btn" href="#/categorias/${ano}/${mes}">Ver categorias</a>`)}
+    <p class="sub descricao">Os gastos sem categoria aparecem agrupados por descrição. Escolha a categoria com um clique: o grupo inteiro é classificado
+      e, com "lembrar" marcado, os próximos meses já vêm classificados.</p>
+
+    ${!cl.length ? cardSemClasses() : ''}
+
+    <section class="card progresso-card">
+      <div class="progresso-topo">
+        <div><strong>${feitos} de ${despesasMes.length}</strong> gastos de ${MESES[mes - 1].toLowerCase()} classificados</div>
+        <span class="pct">${pct}%</span>
+      </div>
+      <div class="progresso grande"><span style="width:${pct}%"></span></div>
+      ${outros.size ? `<p class="hint">Outros meses com gastos sem categoria:
+        ${[...outros.entries()].sort().map(([k, n]) => { const [a, m] = k.split('-').map(Number); return `<a href="#/classificar/${a}/${m}">${MESES_CURTO[m - 1]}/${String(a).slice(2)} (${n})</a>`; }).join(' · ')}</p>` : ''}
+    </section>
+
+    ${!despesasMes.length ? `
+      <section class="card vazio">
+        <h2>Nenhum gasto lançado em ${MESES[mes - 1].toLowerCase()}</h2>
+        <p>Importe os extratos das contas e cartões na tela Lançamentos e volte aqui para classificar.</p>
+        <div class="acoes"><a class="btn primario" href="#/lancamentos/${ano}/${mes}">Ir para Lançamentos</a></div>
+      </section>`
+    : !pend.length ? `
+      <section class="card vazio pronto">
+        <h2>Tudo classificado ✓</h2>
+        <p>Todos os gastos de ${MESES[mes - 1].toLowerCase()} têm categoria.</p>
+        <div class="acoes"><a class="btn primario" href="#/categorias/${ano}/${mes}">Ver quanto foi para cada categoria</a></div>
+      </section>`
+    : `<div class="grupos">${grupos.map((g, gi) => `
+      <section class="card grupo" data-g="${gi}">
+        <div class="grupo-cab">
+          <div class="grupo-txt">
+            <b>${esc(g.ls[0].descricao)}</b>
+            <span class="sub">${g.ls.length > 1 ? `${g.ls.length} lançamentos · ` : ''}<strong>${fmtBRL(g.total)}</strong> ·
+              ${[...new Set(g.ls.map((l) => fmtDia(l.data)))].slice(0, 4).join(', ')}${g.ls.length > 4 ? '…' : ''} ·
+              ${[...new Set(g.ls.map((l) => l.conta || catPorId.get(l.categoria_id)?.nome).filter(Boolean))].map(esc).join(', ')}</span>
+          </div>
+          <div class="seg" role="radiogroup" aria-label="Pessoal ou empresa">
+            ${[['', 'Pela categoria'], ['pessoal', 'Pessoal'], ['empresa', 'Empresa']].map(([v, t]) =>
+              `<label><input type="radio" name="lado-${gi}" value="${v}" ${v === '' ? 'checked' : ''}><span>${t}</span></label>`).join('')}
+          </div>
+        </div>
+        <div class="chips">
+          ${cl.map((c) => `<button type="button" class="chip" data-classe="${c.id}" style="--cor:${c.cor}"><i></i>${esc(c.nome)}${c.escopo_padrao ? `<small>${LADO[c.escopo_padrao]}</small>` : ''}</button>`).join('')}
+        </div>
+        <div class="grupo-pe">
+          <label class="check-linha"><input type="checkbox" data-lembrar checked> Lembrar: sempre que a descrição tiver
+            <input class="regra-texto" data-texto value="${esc(g.base)}" aria-label="Texto da regra"></label>
+          ${g.ls.length > 1 ? `<details><summary>Escolher quais (${g.ls.length})</summary>
+            <div class="grupo-itens">${g.ls.map((l) => `<label class="check-linha"><input type="checkbox" data-id="${l.id}" checked>
+              ${fmtDia(l.data)} · ${esc(l.descricao)} · <b>${fmtBRL(l.valor)}</b></label>`).join('')}</div></details>` : ''}
+        </div>
+      </section>`).join('')}</div>`}`;
+
+  bindSemClasses(main);
+  main.querySelector('[data-a="aplicar-regras"]').addEventListener('click', async () => {
+    const alvo = semClasse(S.data.lancamentos).map((l) => ({ l, r: regraPara(l.descricao, S.data.regras) })).filter((x) => x.r);
+    if (!alvo.length) { toast('Nenhum gasto sem categoria combina com as regras salvas.'); return; }
+    try {
+      for (const { l, r } of alvo) await classificar([l.id], r.classe_id, r.escopo || null, null);
+      toast(`${alvo.length} gastos classificados pelas regras.`);
+      render();
+    } catch (e) { toast(e.message, 'erro'); }
+  });
+  main.querySelectorAll('.grupo').forEach((card) => {
+    const g = grupos[Number(card.dataset.g)];
+    card.querySelectorAll('[data-classe]').forEach((b) => b.addEventListener('click', async () => {
+      const marcados = card.querySelectorAll('[data-id]').length
+        ? [...card.querySelectorAll('[data-id]:checked')].map((x) => x.dataset.id)
+        : g.ls.map((l) => l.id);
+      if (!marcados.length) { toast('Marque pelo menos um lançamento.', 'erro'); return; }
+      const lado = card.querySelector(`input[name="lado-${card.dataset.g}"]:checked`).value || null;
+      const lembrar = card.querySelector('[data-lembrar]').checked;
+      const texto = normDesc(card.querySelector('[data-texto]').value).trim();
+      card.classList.add('saindo');
+      try {
+        await classificar(marcados, b.dataset.classe, lado, lembrar ? texto : null);
+        const c = classePorId(b.dataset.classe);
+        toast(`${marcados.length} → ${c?.nome}${lado ? ` · ${LADO[lado]}` : c?.escopo_padrao ? ` · ${LADO[c.escopo_padrao]}` : ''}${lembrar ? ' · regra salva' : ''}`);
+        render();
+      } catch (e) { card.classList.remove('saindo'); toast(e.message, 'erro'); }
+    }));
+  });
+}
+
+/* ========================================================== categorias */
+function renderCategorias(main, ano, mes) {
+  const porAno = !mes;
+  const fc = S.filtroCat || (S.filtroCat = { escopo: 'todos', conta: '' });
+  const prefixo = porAno ? `${ano}-` : `${ano}-${pad2(mes)}`;
+  const doPeriodo = S.data.lancamentos.filter((l) => l.destino === 'despesa' && String(l.data).startsWith(prefixo));
+  const despesas = doPeriodo
+    .filter((l) => fc.escopo === 'todos' || l.escopo === fc.escopo)
+    .filter((l) => !fc.conta || l.categoria_id === fc.conta);
+  const total = despesas.reduce((s, l) => s + l.valor, 0);
+  const soma = (f) => doPeriodo.filter((l) => !fc.conta || l.categoria_id === fc.conta).filter(f).reduce((s, l) => s + l.valor, 0);
+  const pessoal = soma((l) => l.escopo === 'pessoal');
+  const empresa = soma((l) => l.escopo === 'empresa');
+  const semCat = semClasse(despesas);
+
+  const grupos = new Map();
+  for (const l of despesas) {
+    const k = l.classe_id || '';
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(l);
+  }
+  const linhas = [...grupos.entries()].map(([id, ls]) => {
+    const c = classePorId(id);
+    return { id, nome: c?.nome || 'Sem categoria', cor: c?.cor || '#cbd5e1', ls, total: ls.reduce((s, l) => s + l.valor, 0) };
+  }).sort((a, b) => (a.id === '') - (b.id === '') || b.total - a.total);
+  const maior = Math.max(1, ...linhas.map((x) => x.total));
+  const catPorId = new Map(S.data.categorias.map((c) => [c.id, c]));
+
+  const cab = porAno
+    ? `<div class="mes-topo">
+        <a class="btn icone" href="#/categorias/${ano - 1}" aria-label="Ano anterior">‹</a>
+        <a class="btn icone" href="#/categorias/${ano + 1}" aria-label="Próximo ano">›</a>
+        <h1>Categorias <span>${ano}</span></h1>
+        <div class="mes-acoes"><div class="abas"><a href="#/categorias/${ano}/${new Date().getMonth() + 1}">Mês</a><a class="ativo" href="#/categorias/${ano}">Ano inteiro</a></div></div>
+      </div>`
+    : cabecalhoMes(ano, mes, '#/categorias', `<div class="abas"><a class="ativo" href="#/categorias/${ano}/${mes}">Mês</a><a href="#/categorias/${ano}">Ano inteiro</a></div>`);
+
+  // Tabela categoria × mês (só no ano)
+  const tabelaAno = porAno && linhas.length ? `
+    <section class="card largo">
+      <h2>Mês a mês</h2>
+      <div class="tabela-wrap"><table class="tabela">
+        <thead><tr><th>Categoria</th>${MESES_CURTO.map((m) => `<th>${m}</th>`).join('')}<th>Total</th></tr></thead>
+        <tbody>${linhas.map((x) => `<tr><th><span class="dot" style="background:${x.cor}"></span> ${esc(x.nome)}</th>
+          ${MESES_CURTO.map((_, i) => { const v = x.ls.filter((l) => Number(l.data.slice(5, 7)) === i + 1).reduce((s, l) => s + l.valor, 0); return `<td>${v ? fmtNum(v) : ''}</td>`; }).join('')}
+          <td><b>${fmtNum(x.total)}</b></td></tr>`).join('')}</tbody>
+        <tfoot><tr><th>Total</th>${MESES_CURTO.map((_, i) => { const v = despesas.filter((l) => Number(l.data.slice(5, 7)) === i + 1).reduce((s, l) => s + l.valor, 0); return `<td>${v ? fmtNum(v) : ''}</td>`; }).join('')}<td>${fmtNum(total)}</td></tr></tfoot>
+      </table></div>
+    </section>` : '';
+
+  main.innerHTML = `
+    ${cab}
+    <p class="sub descricao">Quanto foi gasto com cada coisa${porAno ? ' no ano' : ' no mês'}, juntando todas as contas e cartões. Toque numa categoria para ver as compras.</p>
+
+    <section class="mini-kpis">
+      <div class="card"><span>Gastos ${fc.escopo !== 'todos' ? `(${LADO[fc.escopo].toLowerCase()})` : ''}</span><strong>${fmtBRL(total)}</strong></div>
+      <div class="card"><span>Pessoal</span><strong>${fmtBRL(pessoal)}</strong></div>
+      <div class="card"><span>Empresa</span><strong>${fmtBRL(empresa)}</strong></div>
+      <div class="card"><span>Sem categoria</span><strong class="${semCat.length ? 'neg' : ''}">${semCat.length}</strong>
+        ${semCat.length && !porAno ? `<a href="#/classificar/${ano}/${mes}">Classificar →</a>` : ''}</div>
+    </section>
+
+    <section class="card filtros-lanc">
+      <div class="seg" role="group" aria-label="Pessoal ou empresa">
+        ${[['todos', 'Tudo'], ['pessoal', 'Pessoal'], ['empresa', 'Empresa']].map(([v, t]) =>
+          `<button data-escopo="${v}" class="${fc.escopo === v ? 'ativo' : ''}" aria-pressed="${fc.escopo === v}">${t}</button>`).join('')}
+      </div>
+      <select data-f="conta" aria-label="Conta ou cartão">
+        <option value="">Todas as contas e cartões</option>
+        ${cats().map((c) => `<option value="${c.id}" ${fc.conta === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
+      </select>
+    </section>
+
+    ${!S.data.classes.length ? cardSemClasses() : ''}
+
+    ${!despesas.length ? `<section class="card vazio"><h2>Nenhum gasto ${porAno ? `em ${ano}` : `em ${MESES[mes - 1].toLowerCase()}`}</h2>
+      <p>As categorias usam os gastos da tela Lançamentos (lançados à mão ou importados do extrato).</p>
+      <div class="acoes"><a class="btn primario" href="#/lancamentos/${ano}/${mes || new Date().getMonth() + 1}">Ir para Lançamentos</a></div></section>`
+    : `<div class="cat-grid">
+      <section class="card">
+        <h2>Divisão</h2>
+        <div class="rosca"><canvas id="g-rosca"></canvas><div class="rosca-centro"><span>Total</span><strong>${grande(total)}</strong></div></div>
+      </section>
+      <section class="card">
+        <h2>Por categoria</h2>
+        ${linhas.map((x) => `
+          <details class="cat-item">
+            <summary>
+              <span class="dot" style="background:${x.cor}"></span>
+              <span class="cat-nome">${esc(x.nome)}<small>${x.ls.length} ${x.ls.length === 1 ? 'gasto' : 'gastos'}</small></span>
+              <span class="cat-barra"><i style="width:${(x.total / maior) * 100}%;background:${x.cor}"></i></span>
+              <span class="cat-valor"><b>${fmtBRL(x.total)}</b><small>${total ? Math.round((x.total / total) * 100) : 0}%</small></span>
+            </summary>
+            <div class="cat-lista">
+              ${[...x.ls].sort((a, b) => b.data.localeCompare(a.data)).map((l) => `
+                <button class="lanc" data-id="${l.id}">
+                  <span class="lanc-txt"><b>${esc(l.descricao)}</b>
+                    <small>${fmtDia(l.data)} · ${esc(l.conta || catPorId.get(l.categoria_id)?.nome || '')} · <span class="tag ${l.escopo === 'empresa' ? 'empresa' : ''}">${LADO[l.escopo]}</span></small></span>
+                  <span class="lanc-valor">${fmtBRL(l.valor)}</span>
+                </button>`).join('')}
+            </div>
+          </details>`).join('')}
+      </section>
+    </div>`}
+    ${tabelaAno}`;
+
+  bindSemClasses(main);
+  main.querySelectorAll('[data-escopo]').forEach((b) => b.addEventListener('click', () => { fc.escopo = b.dataset.escopo; render(); }));
+  main.querySelector('[data-f="conta"]').addEventListener('change', (e) => { fc.conta = e.target.value; render(); });
+  main.querySelectorAll('.cat-lista .lanc').forEach((b) => b.addEventListener('click', () => {
+    const l = S.data.lancamentos.find((x) => x.id === b.dataset.id);
+    const [a, m] = l.data.split('-').map(Number);
+    abrirLancamento(l, { ano: a, mes: m });
+  }));
+  const canvas = main.querySelector('#g-rosca');
+  if (canvas && window.Chart) {
+    S.charts.push(new Chart(canvas, {
+      type: 'doughnut',
+      data: { labels: linhas.map((x) => x.nome), datasets: [{ data: linhas.map((x) => x.total), backgroundColor: linhas.map((x) => x.cor), borderWidth: 2, borderColor: cssVar('--surface') }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '68%',
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => `${c.label}: ${fmtBRL(c.parsed)}` } } },
+      },
+    }));
+  }
 }
 
 /* ---------------------------------------------------------- filtro */
@@ -1736,11 +2123,27 @@ function renderAjuda(main) {
         <dl class="lista telas">
           <div><dt>${ICON.mes} Mês</dt><dd>O resumo de um mês: quanto sobrou, para onde foi o dinheiro, cada cartão e a comparação com o mês anterior. É a tela do dia a dia.</dd></div>
           <div><dt>${ICON.lista} Lançamentos</dt><dd>Cada gasto ou entrada, um por um, com data e se é pessoal ou da empresa. Também é onde se importa o extrato do banco.</dd></div>
+          <div><dt>${ICON.classificar} Classificar</dt><dd>Os gastos sem categoria, agrupados por descrição. Um clique na categoria classifica o grupo e cria a regra para os próximos meses.</dd></div>
+          <div><dt>${ICON.categorias} Categorias</dt><dd>Quanto foi para cada categoria (Funcionários, Assinaturas…) no mês ou no ano, de todas as contas juntas, com filtro pessoal/empresa.</dd></div>
           <div><dt>${ICON.ano} Ano · Resumo</dt><dd>O ano inteiro: total que entrou e saiu, divisão por cartão/categoria, melhores e piores meses, investimentos e evolução do saldo.</dd></div>
           <div><dt>${ICON.ano} Ano · Planilha</dt><dd>Igual à aba do ano no Excel: um mês por linha e as informações gerais ao lado. Toque num mês para editar.</dd></div>
           <div><dt>${ICON.geral} Todos os anos</dt><dd>Soma de todos os anos, com filtro por período e por cartão/categoria.</dd></div>
           <div><dt>${ICON.ajustes} Ajustes</dt><dd>Cartões e categorias, metas (15%/6×/70%), importar a planilha do Excel e backup.</dd></div>
         </dl>
+      </section>
+
+      <section class="card largo destaque-acao">
+        <h2>Rotina com extratos (todo dia 1º)</h2>
+        <ol class="passos">
+          <li>No app/site de cada banco, baixe o extrato do mês que terminou em <b>OFX</b> (ou CSV): conta da empresa, cartão da empresa, conta pessoal, cartão pessoal…</li>
+          <li>Em <b>Lançamentos → Importar extrato</b>, importe <b>um arquivo por vez</b>, escolhendo de qual conta/cartão ele é.
+            Fatura paga e transferência entre as próprias contas: marque <b>Ignorar</b>.</li>
+          <li>Abra <b>Classificar</b>. Os gastos parecidos vêm juntos (ex.: todos os Pix para o mesmo funcionário). Clique na categoria e pronto —
+            deixe "Lembrar" marcado para os próximos meses virem classificados sozinhos.</li>
+          <li>Se um gasto da empresa saiu da conta pessoal (ou o contrário), troque o lado para <b>Empresa</b>/<b>Pessoal</b> antes de clicar.</li>
+          <li>Veja o resultado em <b>Categorias</b> (quanto foi para cada coisa) e na <b>Visão do mês</b>.</li>
+        </ol>
+        <p class="hint">No primeiro mês dá mais trabalho (criar as regras). Do segundo em diante, a maior parte já chega classificada.</p>
       </section>
 
       <section class="card">
@@ -1801,11 +2204,13 @@ function renderAjustes(main) {
   const usada = (id) => S.data.lancamentos.some((l) => l.categoria_id === id) || S.data.meses.some((m) => m.despesas && m.despesas[id] !== undefined && m.despesas[id] !== null);
   const p = prefs();
   main.innerHTML = `
-    <div class="titulo"><div><h1>Ajustes</h1><p class="sub">Configure o que o site usa nos cálculos. Conta: ${esc(S.user.email || '')}</p></div></div>
+    <div class="titulo"><div><h1>Ajustes</h1><p class="sub">Configure o que o site usa nos cálculos. Conta: ${esc(S.user.email || '')}</p>
+      <p class="sub"><a href="#/ajuda">Ajuda (como usar)</a> · <a href="#/geral">Todos os anos</a></p></div></div>
 
     <section class="card">
-      <h2>1. Cartões e categorias de despesa</h2>
-      <p class="sub">Cada item vira um campo no lançamento do mês e uma coluna na planilha do ano. Use <b>Crédito</b> para cartões (cada cartão um item) e <b>Débito</b> para o que sai direto da conta. Pessoal e empresa ficam juntos: dê nomes claros, ex. "Cartão empresa", "Funcionários".</p>
+      <h2>1. Contas e cartões</h2>
+      <p class="sub"><b>De onde sai o dinheiro.</b> Um item para cada conta ou cartão (ex.: "Conta empresa", "Cartão empresa", "Conta pessoal", "Cartão Nubank").
+        <b>Crédito</b> para cartões, <b>Débito</b> para o que sai direto da conta (Pix, boleto, débito). Também viram as colunas da planilha do ano.</p>
       <div class="lista-cat">
         ${c.map((cat, i) => `
           <div class="cat ${cat.ativo === false ? 'inativa' : ''}" data-id="${cat.id}">
@@ -1824,14 +2229,68 @@ function renderAjustes(main) {
           </div>`).join('') || '<p class="sub">Nenhuma categoria ainda.</p>'}
       </div>
       <form class="nova-cat">
-        <input name="nome" placeholder="Novo cartão ou categoria (ex.: Crédito Nubank)" required>
+        <input name="nome" placeholder="Nova conta ou cartão (ex.: Cartão empresa)" required>
         <select name="tipo"><option value="credito">Crédito</option><option value="debito">Débito</option></select>
         <button class="btn primario">Adicionar</button>
       </form>
     </section>
 
+    <section class="card" id="classes">
+      <h2>2. Categorias de gasto</h2>
+      <p class="sub"><b>Com o que foi gasto</b>, de qualquer conta: Funcionários, Assinaturas, Telefone… O <b>lado padrão</b> decide sozinho se o gasto é
+        pessoal ou da empresa ao classificar (ex.: Funcionários = Empresa). "Depende" mantém o que estiver no lançamento.</p>
+      ${!S.data.classes.length ? '<div class="acoes"><button class="btn primario" data-a="sugeridas">Criar categorias sugeridas</button></div>' : ''}
+      <div class="lista-cat">
+        ${classes().map((cl) => {
+          const usos = S.data.lancamentos.filter((l) => l.classe_id === cl.id).length;
+          return `
+          <div class="cat classe ${cl.ativo === false ? 'inativa' : ''}" data-classe-id="${cl.id}">
+            <input type="color" name="cor" value="${esc(cl.cor)}" aria-label="Cor">
+            <input name="nome" value="${esc(cl.nome)}" aria-label="Nome">
+            <select name="escopo_padrao" aria-label="Lado padrão">
+              <option value="" ${!cl.escopo_padrao ? 'selected' : ''}>Depende</option>
+              <option value="pessoal" ${cl.escopo_padrao === 'pessoal' ? 'selected' : ''}>Pessoal</option>
+              <option value="empresa" ${cl.escopo_padrao === 'empresa' ? 'selected' : ''}>Empresa</option>
+            </select>
+            <div class="cat-acoes">
+              <span class="sub">${usos} ${usos === 1 ? 'uso' : 'usos'}</span>
+              ${usos ? `<button class="btn" data-a="arquivar">${cl.ativo === false ? 'Reativar' : 'Arquivar'}</button>` : '<button class="btn perigo" data-a="excluir">Excluir</button>'}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+      <form class="nova-classe">
+        <input type="color" name="cor" value="#0d9488" aria-label="Cor">
+        <input name="nome" placeholder="Nova categoria (ex.: Contador, Frete)" required>
+        <select name="escopo_padrao"><option value="">Depende</option><option value="pessoal">Pessoal</option><option value="empresa">Empresa</option></select>
+        <button class="btn primario">Adicionar</button>
+      </form>
+    </section>
+
+    <section class="card" id="regras">
+      <h2>3. Regras automáticas</h2>
+      <p class="sub">Quando a descrição de um gasto contém o texto, ele já entra com essa categoria (e lado). As regras são criadas na tela
+        <a href="#/classificar">Classificar</a>; aqui dá para ajustar o texto (ex.: deixar só "joao silva") ou apagar.</p>
+      ${!S.data.regras.length ? '<p class="sub"><i>Nenhuma regra ainda.</i></p>' : `
+      <div class="lista-regras">
+        ${[...S.data.regras].sort((a, b) => (classePorId(a.classe_id)?.nome || '').localeCompare(classePorId(b.classe_id)?.nome || '') || a.texto.localeCompare(b.texto)).map((r) => `
+          <div class="regra" data-regra-id="${r.id}">
+            <span class="sub">contém</span>
+            <input name="texto" value="${esc(r.texto)}" aria-label="Texto">
+            <span class="sub">→</span>
+            <select name="classe_id" aria-label="Categoria">${classes().map((cl) => `<option value="${cl.id}" ${cl.id === r.classe_id ? 'selected' : ''}>${esc(cl.nome)}</option>`).join('')}</select>
+            <select name="escopo" aria-label="Lado">
+              <option value="" ${!r.escopo ? 'selected' : ''}>Lado da categoria</option>
+              <option value="pessoal" ${r.escopo === 'pessoal' ? 'selected' : ''}>Pessoal</option>
+              <option value="empresa" ${r.escopo === 'empresa' ? 'selected' : ''}>Empresa</option>
+            </select>
+            <button class="btn icone perigo" data-a="apagar-regra" aria-label="Apagar regra">×</button>
+          </div>`).join('')}
+      </div>`}
+    </section>
+
     <section class="card">
-      <h2>2. Metas</h2>
+      <h2>4. Metas</h2>
       <p class="sub">Calculadas sobre a receita: quanto investir, quantos meses de reserva ter e o máximo para gastar. Aparecem nas telas Mês e Ano.</p>
       <form class="prefs">
         <label class="campo"><span>% esperado para investir</span><input name="pct_investir" inputmode="decimal" value="${fmtNum(p.pct_investir * 100)}"></label>
@@ -1842,7 +2301,7 @@ function renderAjustes(main) {
     </section>
 
     <section class="card">
-      <h2>3. Importar planilha do Excel</h2>
+      <h2>5. Importar planilha do Excel</h2>
       <p class="sub">Selecione o arquivo <b>FINANÇAS GERAIS.xlsx</b>. As abas de ano (2026, 2027…) são lidas aqui no navegador; meses que já existirem no site serão substituídos.</p>
       <label class="btn arquivo">Escolher planilha…<input type="file" accept=".xlsx,.xls" data-a="xlsx" hidden></label>
       <div class="import-preview"></div>
@@ -1855,7 +2314,7 @@ function renderAjustes(main) {
     </section>
 
     <section class="card">
-      <h2>4. Backup</h2>
+      <h2>6. Backup</h2>
       <p class="sub">Baixe uma cópia de todos os dados (JSON) ou restaure um backup.</p>
       <div class="acoes">
         <button class="btn" data-a="exportar">Baixar backup</button>
@@ -1865,8 +2324,8 @@ function renderAjustes(main) {
 
     ${S.store.mode === 'supabase' ? '<section class="card"><h2>Conta</h2><button class="btn perigo" data-a="sair">Sair</button></section>' : ''}`;
 
-  // --- categorias
-  main.querySelectorAll('.cat').forEach((row) => {
+  // --- contas e cartões
+  main.querySelectorAll('.cat[data-id]').forEach((row) => {
     const cat = S.data.categorias.find((x) => x.id === row.dataset.id);
     const salvarCat = async (mud) => {
       try {
@@ -1912,9 +2371,74 @@ function renderAjustes(main) {
     try {
       const nova = await S.store.saveCategoria({ perfil_id: S.perfilId, nome: f.nome.value.trim(), tipo: f.tipo.value, ordem: S.data.categorias.length + 1, ativo: true });
       S.data.categorias.push(nova);
+      toast('Conta/cartão adicionado.');
+      render();
+    } catch (ex) { toast(ex.message, 'erro'); }
+  });
+
+  // --- categorias de gasto
+  bindSemClasses(main);
+  main.querySelectorAll('[data-classe-id]').forEach((row) => {
+    const cl = S.data.classes.find((x) => x.id === row.dataset.classeId);
+    const salvar = async (mud, msg) => {
+      try { Object.assign(cl, await S.store.saveClasse({ ...cl, ...mud })); if (msg) toast(msg); } catch (e) { toast(e.message, 'erro'); }
+    };
+    row.querySelector('[name="nome"]').addEventListener('change', (e) => {
+      const nome = e.target.value.trim();
+      if (!nome) { e.target.value = cl.nome; return; }
+      salvar({ nome }, 'Nome atualizado.');
+    });
+    row.querySelector('[name="cor"]').addEventListener('change', (e) => salvar({ cor: e.target.value }, 'Cor atualizada.'));
+    row.querySelector('[name="escopo_padrao"]').addEventListener('change', (e) => salvar({ escopo_padrao: e.target.value || null }, 'Lado padrão atualizado.'));
+    row.querySelector('[data-a="arquivar"]')?.addEventListener('click', async () => { await salvar({ ativo: cl.ativo === false }); render(); });
+    row.querySelector('[data-a="excluir"]')?.addEventListener('click', async () => {
+      if (!confirm(`Excluir a categoria "${cl.nome}"? As regras dela também serão apagadas.`)) return;
+      try {
+        await S.store.deleteClasse(cl.id);
+        S.data.classes = S.data.classes.filter((x) => x.id !== cl.id);
+        S.data.regras = S.data.regras.filter((r) => r.classe_id !== cl.id);
+        render();
+      } catch (e) { toast(e.message, 'erro'); }
+    });
+  });
+  main.querySelector('.nova-classe').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    try {
+      S.data.classes.push(await S.store.saveClasse({
+        perfil_id: S.perfilId, nome: f.nome.value.trim(), cor: f.cor.value, escopo_padrao: f.escopo_padrao.value || null,
+        ordem: S.data.classes.length + 1, ativo: true,
+      }));
       toast('Categoria adicionada.');
       render();
     } catch (ex) { toast(ex.message, 'erro'); }
+  });
+
+  // --- regras
+  main.querySelectorAll('[data-regra-id]').forEach((row) => {
+    const r = S.data.regras.find((x) => x.id === row.dataset.regraId);
+    const atualizar = async () => {
+      const texto = normDesc(row.querySelector('[name="texto"]').value).trim();
+      if (texto.length < 2) { toast('O texto precisa ter pelo menos 2 letras.', 'erro'); return; }
+      try {
+        // Mudar o texto cria uma regra nova e apaga a antiga
+        const nova = await S.store.saveRegra({ perfil_id: S.perfilId, texto, classe_id: row.querySelector('[name="classe_id"]').value, escopo: row.querySelector('[name="escopo"]').value || null });
+        if (nova.id !== r.id) { await S.store.deleteRegra(r.id); S.data.regras = S.data.regras.filter((x) => x.id !== r.id); }
+        const i = S.data.regras.findIndex((x) => x.id === nova.id);
+        if (i >= 0) S.data.regras[i] = nova; else S.data.regras.push(nova);
+        toast('Regra atualizada.');
+        render();
+      } catch (e) { toast(e.message, 'erro'); }
+    };
+    row.querySelectorAll('input, select').forEach((x) => x.addEventListener('change', atualizar));
+    row.querySelector('[data-a="apagar-regra"]').addEventListener('click', async () => {
+      try {
+        await S.store.deleteRegra(r.id);
+        S.data.regras = S.data.regras.filter((x) => x.id !== r.id);
+        toast('Regra apagada.');
+        render();
+      } catch (e) { toast(e.message, 'erro'); }
+    });
   });
 
   // --- preferências
@@ -2036,6 +2560,8 @@ const ICON = {
   ajustes: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
   mais: svg('<path d="M12 5v14M5 12h14"/>'),
   editar: svg('<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>'),
+  classificar: svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>'),
+  categorias: svg('<path d="M21.2 15.9A10 10 0 1 1 8 2.8"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>'),
   lista: svg('<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>'),
   upload: svg('<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>'),
   ajuda: svg('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17h.01"/>'),

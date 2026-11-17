@@ -550,3 +550,102 @@ dialog.editor.largo { width: min(1120px, 100vw - 24px); }
   .campos-2 { grid-template-columns: 1fr; }
   .contagem { margin-left: 0; }
 }
+
+/* =====================================================================
+   Categorias de gasto, classificação e regras
+   ===================================================================== */
+.badge {
+  margin-left: auto; min-width: 22px; padding: 0 .4rem; border-radius: 999px; text-align: center;
+  background: #f97316; color: #fff; font-size: .72rem; font-weight: 700; line-height: 20px;
+}
+.destaque-acao { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); background: linear-gradient(180deg, var(--accent-soft), var(--surface) 70%); }
+.aviso-txt { color: var(--aviso); }
+
+/* progresso da classificação */
+.progresso-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; margin-bottom: .5rem; }
+.progresso-topo .pct { font-size: 1.4rem; font-weight: 800; color: var(--accent); }
+.progresso.grande { height: 12px; }
+.vazio.pronto h2 { justify-content: center; color: var(--pos); }
+
+/* grupos para classificar */
+.grupos { display: grid; gap: .85rem; }
+.grupo { display: grid; gap: .8rem; transition: opacity .2s, transform .2s; }
+.grupo.saindo { opacity: .35; transform: scale(.99); pointer-events: none; }
+.grupo-cab { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; align-items: flex-start; }
+.grupo-txt { display: grid; gap: .15rem; min-width: 0; flex: 1 1 320px; }
+.grupo-txt b { font-size: 1.02rem; }
+.grupo-txt strong { color: var(--text); }
+.chips { display: flex; flex-wrap: wrap; gap: .45rem; }
+.chip {
+  display: inline-flex; align-items: center; gap: .45rem; padding: .45rem .75rem; border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cor) 40%, var(--border)); background: color-mix(in srgb, var(--cor) 9%, var(--surface));
+  color: var(--text); font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; transition: transform .08s, background .15s;
+}
+.chip i { width: 9px; height: 9px; border-radius: 50%; background: var(--cor); }
+.chip small { font-size: .7rem; font-weight: 700; color: var(--muted); }
+.chip:hover { background: color-mix(in srgb, var(--cor) 20%, var(--surface)); }
+.chip:active { transform: scale(.97); }
+.grupo-pe { display: grid; gap: .4rem; }
+.grupo-pe .check-linha { font-weight: 500; flex-wrap: wrap; color: var(--muted); font-size: .88rem; }
+.regra-texto {
+  width: auto; min-width: 180px; min-height: 30px; padding: .2rem .5rem; font-size: .85rem;
+  font-family: ui-monospace, Consolas, monospace; background: var(--surface-2);
+}
+.grupo-pe summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .88rem; }
+.grupo-itens { display: grid; gap: .3rem; padding: .5rem 0 0 .25rem; }
+.grupo-itens .check-linha { font-weight: 400; color: var(--text); }
+
+/* tela categorias */
+.cat-grid { display: grid; grid-template-columns: minmax(260px, 360px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.rosca { position: relative; height: 260px; }
+.rosca-centro { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; pointer-events: none; }
+.rosca-centro span { color: var(--muted); font-size: .8rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.rosca-centro strong { font-size: 1.35rem; letter-spacing: -.02em; }
+.rosca-centro small { font-size: .6em; }
+.cat-item { border-bottom: 1px dashed var(--border); }
+.cat-item summary {
+  display: grid; grid-template-columns: auto minmax(120px, 1.2fr) minmax(80px, 1fr) auto; gap: .75rem; align-items: center;
+  padding: .65rem .25rem; cursor: pointer; list-style: none; border-radius: 10px;
+}
+.cat-item summary::-webkit-details-marker { display: none; }
+.cat-item summary:hover { background: var(--surface-2); }
+.cat-nome { display: grid; font-weight: 600; }
+.cat-nome small, .cat-valor small { color: var(--muted); font-weight: 500; font-size: .78rem; }
+.cat-barra { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.cat-barra i { display: block; height: 100%; border-radius: inherit; }
+.cat-valor { display: grid; justify-items: end; }
+.cat-lista { padding: 0 0 .5rem 1.5rem; }
+
+/* pessoal × empresa */
+.divisao { margin-bottom: .6rem; }
+.divisao-barra { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--surface-2); gap: 2px; }
+.divisao-barra span { background: var(--accent); }
+.divisao-barra span.emp { background: #6366f1; }
+.divisao-leg { display: flex; justify-content: space-between; font-size: .82rem; color: var(--muted); margin-top: .35rem; }
+.divisao-leg b { color: var(--text); }
+
+/* ajustes: categorias de gasto e regras */
+.cat.classe { grid-template-columns: 44px 1fr 130px auto; }
+.cat.classe input[type="color"], .nova-classe input[type="color"] { padding: .2rem; min-height: 40px; cursor: pointer; }
+.cat-acoes .sub { align-self: center; margin: 0 .35rem 0 0; white-space: nowrap; }
+.nova-classe { display: grid; grid-template-columns: 44px 1fr 130px auto; gap: .5rem; }
+.lista-regras { display: grid; gap: .45rem; margin-top: .75rem; }
+.regra { display: grid; grid-template-columns: auto 1fr auto 1fr 150px auto; gap: .5rem; align-items: center; }
+.regra input[name="texto"] { font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
+
+@media (max-width: 1000px) {
+  .cat-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .nav a.so-desktop { display: none; }
+  .nav a .badge { position: absolute; top: 0; right: 4px; margin: 0; min-width: 18px; line-height: 16px; font-size: .62rem; }
+}
+@media (max-width: 720px) {
+  .cat.classe, .nova-classe { grid-template-columns: 44px 1fr; }
+  .cat.classe select, .nova-classe select, .cat.classe .cat-acoes, .nova-classe .btn { grid-column: 1 / -1; }
+  .regra { grid-template-columns: 1fr 1fr; }
+  .regra .sub { display: none; }
+  .cat-item summary { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .cat-barra { display: none; }
+  .grupo-cab .seg { width: 100%; }
+}
