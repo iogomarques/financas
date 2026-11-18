@@ -307,3 +307,57 @@ alter table public.fin_lancamentos add constraint fin_lancamentos_recorrencia_ch
 alter table public.fin_lancamentos drop constraint if exists fin_lancamentos_parcela_check;
 alter table public.fin_lancamentos add constraint fin_lancamentos_parcela_check
   check ((parcela is null and parcelas is null) or (parcela between 1 and 99 and parcelas between 1 and 99 and parcela <= parcelas));
+
+-- ===================================================================
+-- Liberar acesso pelo próprio site (2026-11-18)
+-- Só quem está em fin_admins (o Iogo) pode liberar/remover e-mails.
+-- As funções são SECURITY DEFINER e conferem o administrador por dentro.
+-- ===================================================================
+create table if not exists public.fin_admins (
+  user_id   uuid primary key references auth.users (id) on delete restrict,
+  criado_em timestamptz not null default now()
+);
+alter table public.fin_admins enable row level security;
+revoke all on public.fin_admins from anon, authenticated;
+-- insert into public.fin_admins (user_id) values ('<id do administrador>');
+
+create or replace function public.fin_sou_admin()
+returns boolean language sql stable security definer set search_path = ''
+as $$ select exists (select 1 from public.fin_admins a where a.user_id = (select auth.uid())); $$;
+
+create or replace function public.fin_convites_listar()
+returns table (email text, criado_em timestamptz, cadastrado boolean)
+language plpgsql stable security definer set search_path = ''
+as $$
+begin
+  if not public.fin_sou_admin() then raise exception 'Sem permissão'; end if;
+  return query
+    select c.email, c.criado_em, exists (select 1 from auth.users u where lower(u.email) = c.email)
+    from public.fin_convites c order by c.criado_em;
+end $$;
+
+create or replace function public.fin_convidar(p_email text)
+returns void language plpgsql security definer set search_path = ''
+as $$
+declare e text := lower(trim(coalesce(p_email, '')));
+begin
+  if not public.fin_sou_admin() then raise exception 'Sem permissão'; end if;
+  if e !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' or length(e) > 254 then raise exception 'E-mail inválido'; end if;
+  insert into public.fin_convites (email) values (e) on conflict do nothing;
+end $$;
+
+create or replace function public.fin_convite_remover(p_email text)
+returns void language plpgsql security definer set search_path = ''
+as $$
+declare e text := lower(trim(coalesce(p_email, '')));
+begin
+  if not public.fin_sou_admin() then raise exception 'Sem permissão'; end if;
+  if exists (select 1 from auth.users u join public.fin_admins a on a.user_id = u.id where lower(u.email) = e) then
+    raise exception 'Não dá para tirar o acesso do administrador';
+  end if;
+  delete from public.fin_convites where email = e;
+  delete from public.fin_usuarios fu using auth.users u where fu.user_id = u.id and lower(u.email) = e;
+end $$;
+
+revoke all on function public.fin_sou_admin(), public.fin_convites_listar(), public.fin_convidar(text), public.fin_convite_remover(text) from public, anon;
+grant execute on function public.fin_sou_admin(), public.fin_convites_listar(), public.fin_convidar(text), public.fin_convite_remover(text) to authenticated;

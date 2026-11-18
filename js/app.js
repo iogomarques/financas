@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261117193028';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261117193028';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261117193028';
-import { lerPlanilha } from './importer.js?v=20261117193028';
-import { lerExtrato, normDesc } from './extrato.js?v=20261117193028';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261117193028';
-import { ILUSTRA } from './ilustra.js?v=20261117193028';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261118100628';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261118100628';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261118100628';
+import { lerPlanilha } from './importer.js?v=20261118100628';
+import { lerExtrato, normDesc } from './extrato.js?v=20261118100628';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261118100628';
+import { ILUSTRA } from './ilustra.js?v=20261118100628';
 
 const app = document.getElementById('app');
 const S = {
@@ -3934,7 +3934,7 @@ function renderAjuda(main) {
       <section class="card">
         <h2>Configurar uma conta nova</h2>
         <ol class="passos">
-          <li>A pessoa cria a conta em <b>Criar conta</b> e confirma pelo e-mail. A conta precisa estar <b>liberada</b> (convite pelo e-mail).</li>
+          <li>A pessoa cria a conta em <b>Criar conta</b> e confirma pelo e-mail. Antes, o administrador libera o e-mail dela em <b>Ajustes → Acesso de outras pessoas</b>.</li>
           <li>Em <b>Ajustes → Cartões e categorias</b>, cadastre o que a pessoa usa. Exemplos:
             <ul>
               <li><b>Crédito:</b> um item para cada cartão ("Cartão pessoal", "Cartão empresa").</li>
@@ -3967,12 +3967,56 @@ function renderAjuda(main) {
 }
 
 /* ============================================================ ajustes */
+/**
+ * Quadro "Acesso de outras pessoas" (só aparece para o administrador).
+ * O banco confere de novo em cada ação: esconder o quadro não é a proteção.
+ */
+async function montarAcessos(main) {
+  const slot = main.querySelector('#acessos-slot');
+  if (!slot || !S.user) return;
+  const quem = S.user.id || S.user.email || '?'; // lembra a resposta por login
+  if (S.adminDe !== quem) { S.souAdmin = await S.store.souAdmin().catch(() => false); S.adminDe = quem; }
+  if (!S.souAdmin || !slot.isConnected) return;
+  let lista = [];
+  try { lista = await S.store.listarConvites(); } catch (e) { slot.innerHTML = `<section class="card"><p class="neg">${esc(e.message)}</p></section>`; return; }
+  if (!slot.isConnected) return;
+  const meu = (S.user.email || '').toLowerCase();
+  slot.innerHTML = `<section class="card" id="acessos">
+    ${tituloCard('Acesso de outras pessoas', 'Só você vê este quadro. Libere o e-mail da pessoa e depois ela cria a conta no site com esse mesmo e-mail. Cada pessoa vê só os próprios dados.')}
+    <form class="acesso-form">
+      <input type="email" name="email" placeholder="email.da.pessoa@gmail.com" required autocomplete="off" aria-label="E-mail">
+      <button class="btn primario">${ICON.mais}<span>Liberar acesso</span></button>
+    </form>
+    ${lista.length ? `<ul class="acessos">${lista.map((x) => `<li>
+        <span class="avatar">${esc(x.email[0].toUpperCase())}</span>
+        <div><b>${esc(x.email)}</b><small>liberado em ${new Date(x.criado_em).toLocaleDateString('pt-BR')}</small></div>
+        <span class="tag ${x.cadastrado ? 'pos' : 'aviso'}">${x.cadastrado ? 'já criou a conta' : 'aguardando criar a conta'}</span>
+        ${x.email === meu ? '' : `<button class="btn perigo" data-remover="${esc(x.email)}">Tirar acesso</button>`}
+      </li>`).join('')}</ul>` : '<p class="sub">Nenhum e-mail liberado ainda. Quem já tinha acesso antes desta tela continua com acesso.</p>'}
+  </section>`;
+  const form = slot.querySelector('.acesso-form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = form.email.value.trim().toLowerCase();
+    form.querySelector('button').disabled = true;
+    try { await S.store.convidar(email); toast(`Acesso liberado para ${email}. Agora a pessoa pode criar a conta no site com esse e-mail.`); montarAcessos(main); }
+    catch (ex) { toast(ex.message, 'erro'); form.querySelector('button').disabled = false; }
+  });
+  slot.querySelectorAll('[data-remover]').forEach((b) => b.addEventListener('click', async () => {
+    const email = b.dataset.remover;
+    if (!confirm(`Tirar o acesso de ${email}?\n\nA pessoa não consegue mais entrar no site. Os dados dela continuam guardados; se liberar de novo, ela volta a ver tudo.`)) return;
+    try { await S.store.removerConvite(email); toast(`Acesso de ${email} removido.`); montarAcessos(main); } catch (ex) { toast(ex.message, 'erro'); }
+  }));
+}
+
 function renderAjustes(main) {
   const c = cats();
   const usada = (id) => S.data.lancamentos.some((l) => l.categoria_id === id) || S.data.meses.some((m) => m.despesas && m.despesas[id] !== undefined && m.despesas[id] !== null);
   const p = prefs();
   main.innerHTML = `
     ${cabecalhoSimples('Ajustes', '<a class="btn" href="#/ajuda">Ajuda</a>')}
+
+    <div id="acessos-slot"></div>
 
     ${escolhaModo('Modo de uso')}
 
@@ -4205,6 +4249,7 @@ function renderAjustes(main) {
   });
 
   // --- categorias de gasto
+  montarAcessos(main); // só aparece para o administrador
   bindSemClasses(main);
   main.querySelectorAll('[data-classe-id]').forEach((row) => {
     const cl = S.data.classes.find((x) => x.id === row.dataset.classeId);

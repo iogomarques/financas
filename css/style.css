@@ -1277,3 +1277,13 @@ h2 { font-size: 1rem; font-weight: 650; letter-spacing: -.01em; }
 /* marca no topo do celular: logo maior */
 .topo .marca img { width: 50px; height: 50px; }
 .topo .marca > span { font-size: 1.12rem; font-weight: 800; }
+
+/* quadro de acesso de outras pessoas (Ajustes) */
+.acesso-form { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .9rem; }
+.acesso-form input { flex: 1 1 240px; min-height: 40px; }
+.acessos { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.acessos li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: .7rem; align-items: center; padding: .55rem .7rem; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.acessos li > div { display: grid; min-width: 0; }
+.acessos li b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acessos li small { color: var(--muted); font-size: .76rem; }
+@media (max-width: 560px) { .acessos li { grid-template-columns: auto minmax(0, 1fr); } .acessos li .tag, .acessos li .btn { grid-column: 2; justify-self: start; } }

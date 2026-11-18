@@ -10,7 +10,7 @@
 //     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
 //     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261117193028';
+import { uid } from './util.js?v=20261118100628';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
@@ -76,6 +76,11 @@ function localStore() {
     mode: 'local',
     async getUser() { return user; },
     async autorizado() { return true; },
+    // Liberar acesso de outras pessoas só existe no site de verdade (Supabase)
+    async souAdmin() { return false; },
+    async listarConvites() { return []; },
+    async convidar() { throw new Error('Disponível só no site com login.'); },
+    async removerConvite() { throw new Error('Disponível só no site com login.'); },
     onAuthChange() {},
     async signIn() { return user; },
     async signUp() { return user; },
@@ -240,6 +245,15 @@ async function supabaseStore(cfg) {
     async autorizado() {
       return !!check(await sb.rpc('fin_acesso'));
     },
+
+    // Liberar acesso de outras pessoas (só o administrador; o banco confere em cada chamada)
+    async souAdmin() {
+      const { data, error } = await sb.rpc('fin_sou_admin');
+      return !error && data === true;
+    },
+    async listarConvites() { return check(await sb.rpc('fin_convites_listar')) || []; },
+    async convidar(email) { check(await sb.rpc('fin_convidar', { p_email: email })); },
+    async removerConvite(email) { check(await sb.rpc('fin_convite_remover', { p_email: email })); },
 
     async load() {
       const [perfis, cats, classes, regras, meses, prefs] = await Promise.all([
