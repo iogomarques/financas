@@ -1287,3 +1287,8 @@ h2 { font-size: 1rem; font-weight: 650; letter-spacing: -.01em; }
 .acessos li b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .acessos li small { color: var(--muted); font-size: .76rem; }
 @media (max-width: 560px) { .acessos li { grid-template-columns: auto minmax(0, 1fr); } .acessos li .tag, .acessos li .btn { grid-column: 2; justify-self: start; } }
+
+/* conferência da importação (saldos / total da fatura) */
+.conferencia-import { margin: .2rem 0 .6rem; padding: .55rem .8rem; border-radius: 10px; font-size: .88rem; font-weight: 600; }
+.conferencia-import.ok { background: color-mix(in srgb, var(--pos) 14%, transparent); color: var(--pos); }
+.conferencia-import.erro { background: color-mix(in srgb, var(--aviso) 16%, transparent); color: var(--aviso); }

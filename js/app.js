@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261118102816';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261118102816';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261118102816';
-import { lerPlanilha } from './importer.js?v=20261118102816';
-import { lerExtrato, normDesc } from './extrato.js?v=20261118102816';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261118102816';
-import { ILUSTRA } from './ilustra.js?v=20261118102816';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261118110127';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261118110127';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261118110127';
+import { lerPlanilha } from './importer.js?v=20261118110127';
+import { lerExtrato, normDesc } from './extrato.js?v=20261118110127';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261118110127';
+import { ILUSTRA } from './ilustra.js?v=20261118110127';
 
 const app = document.getElementById('app');
 const S = {
@@ -768,7 +768,7 @@ function renderMes(main, ano, mes) {
           ${ehControle() ? `
             ${passo(temCats, 'Cadastrar as contas e cartões', 'Ex.: "Santander pessoal", "Santander Empresas", "Cartão Santander".', '<a class="btn" href="#/ajustes">Abrir Ajustes</a>')}
             ${passo(S.data.classes.length > 0, 'Criar as categorias de gasto', 'Funcionários, Fornecedores, Mercado… Comece pelas sugeridas.', '<a class="btn" href="#/ajustes#classes">Categorias</a>')}
-            ${passo(false, 'Importar o extrato do mês', 'Um arquivo OFX ou CSV por conta ou cartão. Depois é só classificar.', '<button class="btn primario" data-a="importar-mes">Importar extrato</button>')}`
+            ${passo(false, 'Importar o extrato do mês', 'Um arquivo por conta ou cartão: o PDF do extrato ou da fatura (ou OFX/CSV). Depois é só classificar.', '<button class="btn primario" data-a="importar-mes">Importar extrato</button>')}`
           : `
             ${passo(temCats, 'Cadastrar contas e cartões', 'Um item para cada cartão de crédito e um para o débito (as colunas da sua planilha).', '<a class="btn" href="#/ajustes">Abrir Ajustes</a>')}
             ${passo(false, 'Trazer o histórico (opcional)', 'Se existir a planilha FINANÇAS GERAIS.xlsx, importe em Ajustes e todos os meses aparecem aqui.', '<a class="btn" href="#/ajustes">Importar planilha</a>')}
@@ -1108,7 +1108,7 @@ function renderLancamentos(main, ano, mes, aba = 'despesas') {
     const entrada = sentidoDe(l) === 'entrada';
     const c = contaPorId(l.categoria_id);
     return `<tr class="clicavel" data-id="${l.id}" tabindex="0">
-      <td class="t-desc"><div class="t-desc-in">${l.destino === 'transferencia' ? '<span class="ic-cat transf" aria-hidden="true">⇄</span>' : iconeCat(classePorId(l.classe_id))}<div><b>${esc(l.descricao)}</b>${l.parcelas ? ` <span class="tag parcela">${textoParcela(l)}</span>` : ''}<small class="t-meta">${fmtDia(l.data)} · ${esc(c?.banco || c?.nome || l.conta || '')}</small></div></div></td>
+      <td class="t-desc"><div class="t-desc-in">${l.destino === 'transferencia' ? '<span class="ic-cat transf" aria-hidden="true">⇄</span>' : iconeCat(classePorId(l.classe_id))}<div><b>${esc(l.descricao)}</b>${l.parcelas ? ` <span class="tag parcela">${textoParcela(l)}</span>` : ''}${l.portador ? ` <span class="tag">${esc(l.portador)}</span>` : ''}<small class="t-meta">${fmtDia(l.data)} · ${esc(c?.banco || c?.nome || l.conta || '')}</small></div></div></td>
       <td class="t-cat">${chipClasse(l)} ${chipLado(l)}</td>
       <td class="t-conta">${celConta(c)}</td>
       <td class="t-data">${fmtData(l.data)}</td>
@@ -1606,9 +1606,10 @@ function abrirImportacao({ ano, mes }) {
       <form>
         <header><h2>Importar extrato</h2></header>
         <div class="corpo">
-          <p class="sub">Exporte o extrato no site/app do banco em <b>OFX</b> (melhor) ou <b>CSV</b>. Pode ser da conta ou do cartão,
-            de uma semana ou do mês inteiro. Movimentações que já foram importadas antes são <b>puladas automaticamente</b>.</p>
-          <label class="campo"><span>Arquivo do extrato</span><input type="file" name="arquivo" accept=".ofx,.csv,.txt" required></label>
+          <p class="sub">Use o arquivo que o banco entrega: <b>PDF</b> (extrato da conta ou fatura do cartão), <b>OFX</b> ou <b>CSV</b>.
+            Pode ser da conta ou do cartão, de uma semana ou do mês inteiro. Movimentações que já foram importadas antes são <b>puladas automaticamente</b>.
+            O arquivo é lido aqui no seu navegador e não é enviado para lugar nenhum.</p>
+          <label class="campo"><span>Arquivo do extrato ou da fatura</span><input type="file" name="arquivo" accept=".pdf,.ofx,.csv,.txt" required></label>
           <label class="campo"><span>Este extrato é de qual conta/cartão?</span>
             <select name="categoria">${c.map((x) => `<option value="${x.id}" ${cfg.categoria === x.id ? 'selected' : ''}>${esc(x.nome)} (${x.tipo === 'debito' ? 'débito' : 'crédito'})</option>`).join('')}</select>
             <small class="hint">Importe um arquivo por conta ou cartão (ex.: conta da empresa, cartão da empresa, conta pessoal).</small>
@@ -1633,11 +1634,21 @@ function abrirImportacao({ ano, mes }) {
       const erro = form.querySelector('.erro-msg');
       try {
         cfg = { ...cfg, categoria: form.categoria.value, escopo: form.escopo.value };
+        form.querySelector('button[type="submit"]').disabled = true;
+        form.querySelector('button[type="submit"]').textContent = 'Lendo…';
         lido = await lerExtrato(form.arquivo.files[0]);
         if (!lido.linhas.length) throw new Error('Nenhuma movimentação encontrada no arquivo.');
+        // Fatura de cartão escolhida numa conta de débito (ou o contrário): avisa antes de seguir
+        const escolhida = S.data.categorias.find((x) => x.id === cfg.categoria);
+        if (lido.cartao && escolhida?.tipo !== 'credito' && !confirm(`Este arquivo é uma fatura de cartão, mas você escolheu "${escolhida?.nome}" (conta).\n\nContinuar mesmo assim?`)) {
+          form.querySelector('button[type="submit"]').disabled = false; form.querySelector('button[type="submit"]').textContent = 'Ler extrato'; return;
+        }
         lido.linhas.forEach((l) => { l.incluir = undefined; });
         passo2();
-      } catch (ex) { erro.textContent = ex.message; erro.hidden = false; }
+      } catch (ex) {
+        erro.textContent = ex.message; erro.hidden = false;
+        form.querySelector('button[type="submit"]').disabled = false; form.querySelector('button[type="submit"]').textContent = 'Ler extrato';
+      }
     });
   }
 
@@ -1701,6 +1712,16 @@ function abrirImportacao({ ano, mes }) {
             ${nTransf ? `<span class="tag">${nTransf} transferências entre contas (não contam)</span>` : ''}
             ${semCat ? `<span class="tag">${semCat} para classificar depois</span>` : ''}
           </div>
+          ${lido.conferencia ? `<p class="conferencia-import ${lido.conferencia.ok ? 'ok' : 'erro'}">${lido.conferencia.ok ? '✓' : '⚠'} ${esc(lido.conferencia.texto)}</p>` : ''}
+          ${(() => {
+            // Fatura do cartão: oferece preencher fechamento, vencimento e limite do cartão escolhido
+            const ci = lido.cartaoInfo;
+            if (!ci || catPadrao?.tipo !== 'credito') return '';
+            const muda = Number(catPadrao.dia_fechamento) !== ci.diaFechamento || Number(catPadrao.dia_vencimento) !== ci.diaVencimento || (ci.limite && Number(catPadrao.limite) !== ci.limite);
+            if (!muda) return '';
+            return `<label class="check-linha"><input type="checkbox" name="atualizar_cartao" ${cfg.atualizarCartao !== false ? 'checked' : ''}>
+              Atualizar o cartão "${esc(catPadrao.nome)}" com os dados da fatura: fecha dia ${ci.diaFechamento}, vence dia ${ci.diaVencimento}${ci.limite ? `, limite ${fmtBRL(ci.limite)}` : ''}</label>`;
+          })()}
           ${!S.data.classes.length ? '<p class="hint">Dica: crie as categorias de gasto (Funcionários, Assinaturas…) em Ajustes ou na tela Classificar. Dá para importar agora e classificar depois.</p>' : ''}
           <label class="check-linha"><input type="checkbox" name="inverter" ${cfg.inverter ? 'checked' : ''}>
             Inverter sinais <small class="sub">(marque se as compras aparecerem como entrada)</small></label>
@@ -1712,7 +1733,7 @@ function abrirImportacao({ ano, mes }) {
                   <tr data-i="${l.i}" class="${l.status}">
                     <td><input type="checkbox" data-c="incluir" ${l.incluir && l.status !== 'ja' ? 'checked' : ''} ${l.status === 'ja' ? 'disabled' : ''} aria-label="Importar"></td>
                     <td>${fmtDia(l.data)}</td>
-                    <td class="desc">${esc(l.descricao)}${l.status === 'ja' ? ' <span class="tag">já importada</span>' : l.status === 'parece' ? ' <span class="tag aviso">parece repetida</span>' : ''}</td>
+                    <td class="desc">${esc(l.descricao)}${l.parcelas ? ` <span class="tag parcela">${l.parcela}/${l.parcelas}</span>` : ''}${l.portador ? ` <span class="tag">${esc(l.portador)}</span>` : ''}${l.status === 'ja' ? ' <span class="tag">já importada</span>' : l.status === 'parece' ? ' <span class="tag aviso">parece repetida</span>' : ''}</td>
                     <td class="${l.saida ? 'neg' : 'pos'}">${l.saida ? '−' : '+'} ${fmtNum(l.valor)}</td>
                     <td><select data-c="destino" ${l.status === 'ja' ? 'disabled' : ''}>
                       ${[['despesa', 'Despesa'], ['receita', 'Receita'], ['rendimento', 'Rendim./outras'], ['investimento', 'Investimento'], ['transferencia', 'Transferência'], ['ignorar', 'Não importar']]
@@ -1748,6 +1769,7 @@ function abrirImportacao({ ano, mes }) {
       tr.querySelector('[data-c="classe"]').addEventListener('change', (e) => { l.classeEscolhida = e.target.value || null; passo2(); });
       tr.querySelector('[data-c="escopo"]').addEventListener('change', (e) => { l.escopoEscolhido = e.target.value; });
     });
+    form.atualizar_cartao?.addEventListener('change', (e) => { cfg.atualizarCartao = e.target.checked; });
     form.inverter.addEventListener('change', (e) => {
       cfg.inverter = e.target.checked;
       lido.linhas.forEach((l) => { delete l.destinoEscolhido; delete l.classeEscolhida; });
@@ -1763,8 +1785,10 @@ function abrirImportacao({ ano, mes }) {
       const nomeConta = S.data.categorias.find((x) => x.id === cfg.categoria)?.nome || lido.conta;
       const ehCartao = S.data.categorias.find((x) => x.id === cfg.categoria)?.tipo === 'credito';
       const novos = atuais.map((l) => {
-        // compra parcelada no extrato ("PARC 03/10") já entra marcada
-        const parc = l.destino === 'despesa' ? detectarParcela(l.descricao, { cartao: ehCartao }) : null;
+        // compra parcelada: a fatura em PDF já diz a parcela; no extrato ("PARC 03/10") o site descobre pela descrição
+        const parc = l.destino !== 'despesa' ? null
+          : l.parcelas ? { parcela: l.parcela, parcelas: l.parcelas }
+          : detectarParcela(l.descricao, { cartao: ehCartao });
         return {
           perfil_id: S.perfilId, data: l.data, descricao: l.descricao.slice(0, 200), valor: Math.round(l.valor * 100) / 100,
           destino: l.destino, categoria_id: l.categoria_id, // a conta/cartão do arquivo, em qualquer tipo
@@ -1772,6 +1796,7 @@ function abrirImportacao({ ano, mes }) {
           sentido: l.saida ? 'saida' : 'entrada',
           escopo: l.escopo, origem: 'extrato', conta: nomeConta, chave: l.chave,
           recorrencia: parc ? 'parcelada' : null, parcela: parc?.parcela || null, parcelas: parc?.parcelas || null,
+          portador: l.portador || null,
         };
       });
       // O outro lado de um par (já importado antes como receita/despesa) também vira transferência
@@ -1790,6 +1815,13 @@ function abrirImportacao({ ano, mes }) {
       try {
         const inseridos = await S.store.importarLancamentos(novos);
         S.data.lancamentos.push(...inseridos);
+        // Dados do cartão vindos da fatura (fechamento, vencimento, limite)
+        const ci = lido.cartaoInfo;
+        const cartaoSel = S.data.categorias.find((x) => x.id === cfg.categoria);
+        if (ci && cartaoSel?.tipo === 'credito' && form.atualizar_cartao?.checked) {
+          const salvo = await S.store.saveCategoria({ ...cartaoSel, dia_fechamento: ci.diaFechamento, dia_vencimento: ci.diaVencimento, limite: ci.limite || cartaoSel.limite });
+          Object.assign(cartaoSel, salvo);
+        }
         if (paresParaCorrigir.length) await virarTransferencia([...new Set(paresParaCorrigir)]);
         const pulados = linhas.length - inseridos.length;
         const paraClassificar = semClasse(inseridos).length;
@@ -2704,6 +2736,7 @@ function renderGraficos(main, ano, mes) {
 const ICONES_CAT = [
   [/mercad|hortifr|supermerc|compra/, '<circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h3l2.6 12.2a2 2 0 0 0 2 1.6h8.7a2 2 0 0 0 2-1.5L22 7H6"/>'],
   [/aliment|restaur|lanche|comida|refei|ifood|padar/, '<path d="M7 2v20M4 2v6a3 3 0 0 0 6 0V2M17 2c-1.7 1.3-3 3.8-3 7h3v13"/>'],
+  [/familia|mesada|filho|filha|esposa|marido/, '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M16 14.2a5 5 0 0 1 6 4.8"/>'],
   [/combust|posto|transport|uber|carro|ve[ií]cul|estacion|ped[aá]gio/, '<path d="M5 17h14M6 17l1.5-6h9L18 17M4 17v3h3v-3M17 17v3h3v-3"/><circle cx="7.5" cy="14" r=".6"/><circle cx="16.5" cy="14" r=".6"/>'],
   [/sa[uú]de|farm[aá]c|m[eé]dic|hospital|dent/, '<path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.7l-1-1.1a5.5 5.5 0 1 0-7.8 7.8L12 22l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/>'],
   [/educa|escola|curso|faculd|livro/, '<path d="M2 7l10-4 10 4-10 4L2 7z"/><path d="M6 9v5c0 1.7 2.7 3 6 3s6-1.3 6-3V9"/>'],
@@ -2790,7 +2823,7 @@ function linhaExtrato(l, { saldo = null, mostrarConta = false } = {}) {
     <span class="ext-txt"><b>${esc(l.descricao)}</b>
       <small>${fmtDia(l.data)} · ${esc(rotuloLanc(l))}${conta ? ` · ${esc(conta.banco || conta.nome)}` : ''}
         ${l.parcelas ? `<span class="tag parcela">${textoParcela(l)}</span>` : rec === 'fixa' ? '<span class="tag fixa">fixa</span>' : ''}
-        ${l.escopo === 'empresa' && !t ? '<span class="tag empresa">Empresa</span>' : ''}</small></span>
+        ${l.escopo === 'empresa' && !t ? '<span class="tag empresa">Empresa</span>' : ''}${l.portador ? `<span class="tag">${esc(l.portador)}</span>` : ''}</small></span>
     <span class="ext-valor"><b class="${t ? '' : entrada ? 'pos' : 'neg'}">${entrada ? '+' : '−'} ${fmtBRL(l.valor)}</b>${saldo !== null ? `<small>saldo ${fmtBRL(saldo)}</small>` : ''}</span>
   </button>`;
 }
@@ -3941,7 +3974,7 @@ function renderAjuda(main) {
         <p class="sub">Há duas formas de lançar — use a que for mais prática:</p>
         <ol class="passos">
           <li><b>Só o total do mês</b>, na tela Mês (como na planilha).</li>
-          <li><b>Gasto por gasto</b>, na tela Transações: à mão (ex.: toda semana) ou <b>importando o extrato</b> do banco/cartão (arquivo OFX ou CSV).</li>
+          <li><b>Gasto por gasto</b>, na tela Transações: à mão (ex.: toda semana) ou <b>importando o extrato</b> do banco/cartão (PDF do extrato ou da fatura, OFX ou CSV).</li>
         </ol>
         <p class="sub">Como o site evita contar duas vezes:</p>
         <ul class="passos">

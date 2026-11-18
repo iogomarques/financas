@@ -361,3 +361,11 @@ end $$;
 
 revoke all on function public.fin_sou_admin(), public.fin_convites_listar(), public.fin_convidar(text), public.fin_convite_remover(text) from public, anon;
 grant execute on function public.fin_sou_admin(), public.fin_convites_listar(), public.fin_convidar(text), public.fin_convite_remover(text) to authenticated;
+
+-- ===================================================================
+-- Portador do cartão (2026-11-18): a fatura junta titular e adicionais;
+-- guarda de quem é o cartão de cada compra (ex.: "Fulano 1234").
+-- ===================================================================
+alter table public.fin_lancamentos add column if not exists portador text;
+alter table public.fin_lancamentos drop constraint if exists fin_lancamentos_portador_check;
+alter table public.fin_lancamentos add constraint fin_lancamentos_portador_check check (portador is null or char_length(portador) <= 40);

@@ -4,10 +4,11 @@
 // Cada movimentação recebe uma "chave" (identidade). O banco de dados recusa duas
 // movimentações com a mesma chave, então importar o mesmo extrato duas vezes — ou um
 // extrato que repete dias de uma importação anterior — nunca duplica nada.
-//   OFX: chave = id da transação no banco (FITID) + conta + data + valor — só quando o FITID é
-//        de verdade (não "000000" e não repetido no arquivo); senão, igual ao CSV sem identificador
+//   OFX e PDF: chave = data + valor + descrição + nº da conta + nº da ocorrência no arquivo.
+//     O FITID do OFX não é usado: o Santander manda "000000" para quase tudo, e usar a mesma regra
+//     do PDF faz o mesmo mês importado em PDF e depois em OFX (ou o contrário) não duplicar.
 //   CSV com coluna de identificador: chave = identificador
-//   CSV sem identificador: chave = data + valor + descrição + conta + nº da ocorrência no arquivo
+//   CSV sem identificador: igual ao OFX/PDF
 //     (o nº da ocorrência permite duas compras iguais no mesmo dia sem perder nenhuma)
 
 /** Normaliza descrição para comparar: minúsculas, sem acento, sem espaços extras. */
@@ -70,7 +71,8 @@ function lerOFX(texto) {
     const m = new RegExp(`<${nome}>([^<\\r\\n]*)`, 'i').exec(bloco);
     return m ? m[1].trim() : '';
   };
-  const conta = tag(texto, 'ACCTID') || 'ofx';
+  // só os dígitos, sem zeros à esquerda: o mesmo número que o PDF mostra (ex.: "000012345678" = "01.234567-8")
+  const conta = tag(texto, 'ACCTID').replace(/\D/g, '').replace(/^0+/, '') || 'ofx';
   const cartao = /<CCSTMTRS>/i.test(texto);
   const linhas = [];
   const partes = texto.split(/<STMTTRN>/i).slice(1);
@@ -86,15 +88,8 @@ function lerOFX(texto) {
     if (!data || !Number.isFinite(valor) || valor === 0) continue;
     linhas.push({ data, valor, descricao, fitid });
   }
-  // FITID só serve de identidade quando é de verdade: o Santander manda "000000" para a maioria das
-  // movimentações (e repete o mesmo número). Nesses casos a identidade vem de data + valor + descrição.
-  const usos = new Map();
-  for (const l of linhas) if (l.fitid) usos.set(l.fitid, (usos.get(l.fitid) || 0) + 1);
-  for (const l of linhas) {
-    const valido = l.fitid && !/^0+$/.test(l.fitid) && usos.get(l.fitid) === 1;
-    l.chave = valido ? `ofx:${conta}:${l.fitid}:${l.data}:${l.valor.toFixed(2)}` : null;
-    delete l.fitid;
-  }
+  // Identidade por data + valor + descrição (ver o comentário no topo): igual para OFX e PDF
+  for (const l of linhas) { l.chave = null; delete l.fitid; }
   const saldo = numero(tag(texto, 'BALAMT'));
   return {
     formato: cartao ? 'OFX (cartão)' : 'OFX (conta)', conta, cartao, linhas: chavesPorOcorrencia(linhas, conta),
@@ -153,11 +148,20 @@ function lerCSV(texto, nomeArquivo) {
 
 /**
  * Lê o arquivo do extrato.
- * Devolve { formato, conta, cartao, linhas: [{data, valor (negativo = saída), descricao, chave}] }.
+ * Devolve { formato, conta, cartao, linhas: [{data, valor (negativo = saída), descricao, chave, parcela?, parcelas?, portador?}],
+ *           conferencia?: {ok, texto}, cartaoInfo?: {diaFechamento, diaVencimento, limite} }.
  */
 export async function lerExtrato(file) {
+  // PDF (extrato da conta ou fatura do cartão): leitor próprio, carregado só quando precisa
+  const inicio = new Uint8Array(await file.slice(0, 5).arrayBuffer());
+  if (/\.pdf$/i.test(file.name) || String.fromCharCode(...inicio) === '%PDF-') {
+    const { lerPDF } = await import('./pdf-extrato.js?v=20261118110127');
+    const r = await lerPDF(file);
+    chavesPorOcorrencia(r.linhas, r.conta);
+    return r;
+  }
   const texto = await lerTexto(file);
   if (/<OFX>|OFXHEADER/i.test(texto)) return lerOFX(texto);
   if (/\.(csv|txt)$/i.test(file.name) || texto.includes(';') || texto.includes(',')) return lerCSV(texto, file.name);
-  throw new Error('Formato não reconhecido. Use o arquivo OFX ou CSV exportado pelo banco.');
+  throw new Error('Formato não reconhecido. Use o PDF, OFX ou CSV exportado pelo banco.');
 }
