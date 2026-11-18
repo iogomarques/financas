@@ -3,7 +3,7 @@
 // Separação pessoal × empresa é por LANÇAMENTO (não por conta): a mesma conta pode ter os dois.
 // Ordem para decidir o lado de um lançamento:
 //   1. lado escolhido na regra  →  2. lado padrão da categoria  →  3. o que já estava no lançamento
-import { normDesc } from './extrato.js?v=20261118100628';
+import { normDesc } from './extrato.js?v=20261118102816';
 
 /** Sugestões para começar: [nome, cor, lado padrão ('empresa' | 'pessoal' | null = depende)] */
 export const CLASSES_SUGERIDAS = [
@@ -77,7 +77,10 @@ export function regraPadrao(descricao) {
  */
 export function detectarTransferencia(descricao, meusNomes = []) {
   const n = normDesc(descricao);
-  if (/(pagamento|pagto|pgto|pag)\.? ?(de )?(fatura|cartao)|fatura (do )?cartao|pagamento cartao de credito|pag fat|deb\.? ?aut\.? ?fatura/.test(n)) return 'fatura';
+  // rendimento da aplicação automática ("REMUNERACAO APLICACAO AUTOMATICA") é receita, não transferência
+  if (/remuneracao|rendimento|juros sobre/.test(n)) return null;
+  // pagamento da fatura do cartão: "PAGAMENTO CARTAO CREDITO", "DEBITO AUT. FAT.CARTAO MASTER CARD"
+  if (/(pagamento|pagto|pgto|pag)\.? ?(de )?(fatura|cartao)|fatura (do )?cartao|pagamento cartao de credito|pag fat|deb(ito)?\.? ?aut\.? ?(fatura|fat\.? ?cartao)|fat\.? ?cartao/.test(n)) return 'fatura';
   if (/mesma titularidade|entre contas|transf(erencia)? (entre )?(contas )?propria|aplicacao automatica|resgate automatico/.test(n)) return 'propria';
   for (const nome of meusNomes) {
     const m = normDesc(nome).trim();

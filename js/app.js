@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261118100628';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261118100628';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261118100628';
-import { lerPlanilha } from './importer.js?v=20261118100628';
-import { lerExtrato, normDesc } from './extrato.js?v=20261118100628';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261118100628';
-import { ILUSTRA } from './ilustra.js?v=20261118100628';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261118102816';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261118102816';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261118102816';
+import { lerPlanilha } from './importer.js?v=20261118102816';
+import { lerExtrato, normDesc } from './extrato.js?v=20261118102816';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261118102816';
+import { ILUSTRA } from './ilustra.js?v=20261118102816';
 
 const app = document.getElementById('app');
 const S = {
@@ -117,15 +117,36 @@ function opcoesClasses(tipo, sel, vazio = '— sem categoria —') {
   return `<option value="">${vazio}</option>` + arvoreClasses(tipo, { incluir: sel }).map((c) =>
     `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${c.nivel ? '   ↳ ' : ''}${esc(c.nome)}</option>`).join('');
 }
-/** Sugere categoria (regra → histórico → parecido) só entre as do tipo certo. */
+/**
+ * Palavras comuns nos extratos dos bancos → nome da categoria sugerida.
+ * Só vale quando ainda não há regra nem histórico, e só se a pessoa tiver uma categoria com esse nome.
+ */
+const PADROES_BANCO = [
+  [/\btarifa|\biof\b|juros saldo|seguro cheque|anuidade|cesta de servicos/, 'tarifas bancarias'],
+  [/energia|equatorial|\benel\b|cemig|copel|agua e esgoto|saneago|sabesp|comgas/, 'luz, agua e gas'],
+  [/telefon|celular|\btim\b|\bvivo\b|\bclaro\b|telefonica/, 'telefone e internet'],
+  [/combustiv|auto posto|\bposto\b|ipiranga|\bshell\b|petrobras/, 'combustivel'],
+  [/supermerc|sendas|atacad|assai|carrefour|hipermerc|mercearia|hortifruti|casa de carne|acougue/, 'mercado'],
+  [/drogasil|drogaria|farmac|\braia\b|pague menos/, 'saude e farmacia'],
+  [/ifood|restaurant|lanchonete|pamonharia|marmitaria|padaria|panificadora|pasteis|espetinho|gastrobar/, 'restaurantes e lanches'],
+  [/ministerio da fazenda|receita federal|municipio de|departamento estadual|detran|simples nacional|\bdarf\b|\biptu\b|\bipva\b/, 'impostos e taxas'],
+  [/netflix|spotify|amazon prime|disney|youtube|google one/, 'assinaturas'],
+];
+
+/** Sugere categoria (regra → histórico → parecido → palavra do banco) só entre as do tipo certo. */
 function sugerirClasse(descricao, tipo, escopoPadrao) {
   const ok = (id) => !!id && !!classePorId(id) && tipoDaClasse(classePorId(id)) === tipo;
-  return sugerir(descricao, {
+  const sug = sugerir(descricao, {
     regras: S.data.regras.filter((r) => ok(r.classe_id)),
     classes: S.data.classes,
     lancamentos: S.data.lancamentos.filter((l) => ok(l.classe_id)),
     escopoPadrao,
   });
+  if (sug.classe_id || tipo !== 'despesa') return sug;
+  const n = normDesc(descricao);
+  const alvo = PADROES_BANCO.find(([re]) => re.test(n))?.[1];
+  const c = alvo && S.data.classes.find((x) => x.ativo !== false && tipoDaClasse(x) === 'despesa' && normDesc(x.nome) === alvo);
+  return c ? { classe_id: c.id, escopo: c.escopo_padrao || escopoPadrao, por: 'palavra' } : sug;
 }
 /* ------------------------------------------------ parcelas e recorrência */
 const RECORRENCIAS = { fixa: 'Fixa', parcelada: 'Parcelada', variavel: 'Variável' };
@@ -1645,6 +1666,7 @@ function abrirImportacao({ ano, mes }) {
       const padrao = transf ? 'transferencia'
         : saida ? 'despesa'
         : catPadrao?.tipo === 'credito' ? 'transferencia' // entrada no cartão = pagamento da fatura
+        : /remuneracao|rendimento|juros sobre/.test(normDesc(l.descricao)) ? 'rendimento' // ex.: "REMUNERACAO APLICACAO AUTOMATICA"
         : 'receita';
       return {
         i, ...l, valor: Math.abs(valor), saida, status, transf, par,
@@ -1697,7 +1719,7 @@ function abrirImportacao({ ano, mes }) {
                         .map(([v, t]) => `<option value="${v}" ${l.destino === v ? 'selected' : ''}>${t}</option>`).join('')}</select>
                       ${l.destino === 'transferencia' && l.transf ? `<span class="tag" title="${l.transf === 'par' ? `Mesmo valor em ${esc(contaDe(l.par))} em ${fmtDia(l.par.data)}` : ''}">${{ fatura: 'fatura', propria: 'conta sua', par: 'par: ' + esc(contaDe(l.par)) }[l.transf]}</span>` : ''}</td>
                     <td><select data-c="classe" ${l.status === 'ja' || !tipoClasseDe(l.destino) ? 'disabled' : ''}>${opcoesClasse(l)}</select>
-                      ${!classeOk(l) ? '' : l.por === 'regra' ? '<span class="tag pos" title="Classificado por uma regra">regra</span>' : l.por === 'historico' ? '<span class="tag" title="Igual a um lançamento anterior">anterior</span>' : ''}</td>
+                      ${!classeOk(l) ? '' : l.por === 'regra' ? '<span class="tag pos" title="Classificado por uma regra">regra</span>' : l.por === 'historico' ? '<span class="tag" title="Igual a um lançamento anterior">anterior</span>' : l.por === 'palavra' ? '<span class="tag" title="Sugerido pela descrição do banco — confira">sugestão</span>' : ''}</td>
                     <td><select data-c="escopo" ${l.status === 'ja' ? 'disabled' : ''}>
                       <option value="pessoal" ${l.escopo === 'pessoal' ? 'selected' : ''}>Pessoal</option>
                       <option value="empresa" ${l.escopo === 'empresa' ? 'selected' : ''}>Empresa</option></select></td>

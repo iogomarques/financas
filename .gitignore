@@ -5,3 +5,8 @@
 financas-backup-*.json
 .DS_Store
 Thumbs.db
+
+# extratos reais usados só para teste local (nunca enviar)
+teste-extratos/
+*.ofx
+*.pdf

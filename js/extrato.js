@@ -4,7 +4,8 @@
 // Cada movimentação recebe uma "chave" (identidade). O banco de dados recusa duas
 // movimentações com a mesma chave, então importar o mesmo extrato duas vezes — ou um
 // extrato que repete dias de uma importação anterior — nunca duplica nada.
-//   OFX: chave = id da transação no banco (FITID) + conta
+//   OFX: chave = id da transação no banco (FITID) + conta + data + valor — só quando o FITID é
+//        de verdade (não "000000" e não repetido no arquivo); senão, igual ao CSV sem identificador
 //   CSV com coluna de identificador: chave = identificador
 //   CSV sem identificador: chave = data + valor + descrição + conta + nº da ocorrência no arquivo
 //     (o nº da ocorrência permite duas compras iguais no mesmo dia sem perder nenhuma)
@@ -77,14 +78,28 @@ function lerOFX(texto) {
     const bloco = p.split(/<\/STMTTRN>/i)[0];
     const data = dataISO(tag(bloco, 'DTPOSTED'));
     const valor = numero(tag(bloco, 'TRNAMT'));
-    const memo = tag(bloco, 'MEMO');
-    const nome = tag(bloco, 'NAME');
+    // Santander e outros às vezes repetem espaços no meio do texto ("PIX ENVIADO        FULANO")
+    const memo = tag(bloco, 'MEMO').replace(/\s{2,}/g, ' ');
+    const nome = tag(bloco, 'NAME').replace(/\s{2,}/g, ' ');
     const descricao = [nome, memo].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(' — ') || 'Sem descrição';
     const fitid = tag(bloco, 'FITID');
     if (!data || !Number.isFinite(valor) || valor === 0) continue;
-    linhas.push({ data, valor, descricao, chave: fitid ? `ofx:${conta}:${fitid}` : null });
+    linhas.push({ data, valor, descricao, fitid });
   }
-  return { formato: cartao ? 'OFX (cartão)' : 'OFX (conta)', conta, cartao, linhas: chavesPorOcorrencia(linhas, conta) };
+  // FITID só serve de identidade quando é de verdade: o Santander manda "000000" para a maioria das
+  // movimentações (e repete o mesmo número). Nesses casos a identidade vem de data + valor + descrição.
+  const usos = new Map();
+  for (const l of linhas) if (l.fitid) usos.set(l.fitid, (usos.get(l.fitid) || 0) + 1);
+  for (const l of linhas) {
+    const valido = l.fitid && !/^0+$/.test(l.fitid) && usos.get(l.fitid) === 1;
+    l.chave = valido ? `ofx:${conta}:${l.fitid}:${l.data}:${l.valor.toFixed(2)}` : null;
+    delete l.fitid;
+  }
+  const saldo = numero(tag(texto, 'BALAMT'));
+  return {
+    formato: cartao ? 'OFX (cartão)' : 'OFX (conta)', conta, cartao, linhas: chavesPorOcorrencia(linhas, conta),
+    saldoBanco: Number.isFinite(saldo) ? { valor: saldo, data: dataISO(tag(texto, 'DTASOF')) } : null,
+  };
 }
 
 /* --------------------------------------------------------------- CSV */
