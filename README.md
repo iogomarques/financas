@@ -1,5 +1,13 @@
 # Finanças Marques — site
 
+<p align="center">
+  <a href="https://iogomarques.github.io/financas/"><img src="icons/icon-192.png" width="120" alt="Logo Finanças Marques"></a>
+</p>
+
+<h2 align="center">👉 <a href="https://iogomarques.github.io/financas/">Abrir o site: iogomarques.github.io/financas</a></h2>
+
+---
+
 Versão web da planilha **FINANÇAS GERAIS.xlsx**: lança receita, despesas por cartão (débito/crédito),
 investimento, rendimento e saldo inicial mês a mês, e calcula tudo igual à planilha
 (totais, médias que ignoram meses vazios, saldo final = saldo inicial do mês seguinte, resultado do saldo,
