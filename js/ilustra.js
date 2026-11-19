@@ -7,8 +7,13 @@ const BASE = 'https://cdn.jsdelivr.net/gh/microsoft/fluentui-emoji@1ffb34c752ecf
 const img = (pasta, arquivo, rotulo) =>
   `<img class="ilustra-img" src="${BASE}${encodeURIComponent(pasta)}/3D/${arquivo}_3d.png" alt="${rotulo}" loading="lazy" decoding="async" draggable="false">`;
 
+// Imagens guardadas no próprio site (icons/3d): conjunto "3dicons" — licença CC0 (domínio público)
+// https://github.com/realvjy/3dicons
+const local = (arquivo, rotulo) =>
+  `<img class="ilustra-img" src="icons/3d/${arquivo}.png" alt="${rotulo}" loading="lazy" decoding="async" draggable="false">`;
+
 export const ILUSTRA = {
-  carteira: img('Purse', 'purse', 'Carteira'),               // sobra / dinheiro do mês
+  carteira: local('carteira', 'Carteira'),                   // saldo / dinheiro do mês
   calendario: img('Spiral calendar', 'spiral_calendar', 'Calendário'),
   cofrinho: img('Coin', 'coin', 'Moeda'),                    // investimento
   grafico: img('Bar chart', 'bar_chart', 'Gráfico'),

@@ -155,7 +155,7 @@ export async function lerExtrato(file) {
   // PDF (extrato da conta ou fatura do cartão): leitor próprio, carregado só quando precisa
   const inicio = new Uint8Array(await file.slice(0, 5).arrayBuffer());
   if (/\.pdf$/i.test(file.name) || String.fromCharCode(...inicio) === '%PDF-') {
-    const { lerPDF } = await import('./pdf-extrato.js?v=20261119195141');
+    const { lerPDF } = await import('./pdf-extrato.js?v=20261119200134');
     const r = await lerPDF(file);
     chavesPorOcorrencia(r.linhas, r.conta);
     return r;

@@ -1341,3 +1341,57 @@ a.card.vg:hover .vg-seta { opacity: 1; transform: translateX(2px); color: var(--
 .vg > div { min-width: 0; }
 .vg .chip-var { white-space: nowrap; font-size: .72rem; }
 @media (max-width: 1350px) { .vg .vg-icone { width: 52px; height: 52px; padding: 8px; } }
+
+/* ===================== Trocar de conta */
+.lateral .contas-ancora { margin-top: auto; }
+.lateral .tema + .contas-ancora { margin-top: 0; }
+.contas-ancora { position: relative; }
+button.lateral-pe { width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; transition: border-color .12s, background .12s; }
+button.lateral-pe:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.lateral-pe .pe-trocar { margin-left: auto; color: var(--muted); display: grid; }
+.lateral-pe .pe-trocar svg { width: 17px; height: 17px; }
+.so-celular { display: none; }
+@media (max-width: 900px) { .so-celular { display: block; } }
+.topo-conta { display: flex; align-items: center; gap: .45rem; padding: .25rem .55rem .25rem .25rem; border: 1px solid var(--border); border-radius: 999px;
+  background: var(--surface-2); color: var(--text); font: inherit; font-size: .82rem; font-weight: 600; cursor: pointer; max-width: 170px; }
+.topo-conta .avatar { width: 28px; height: 28px; font-size: .85rem; }
+.topo-conta-nome { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topo-conta svg { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.contas-pop { position: fixed; z-index: 60; width: 300px; max-width: calc(100vw - 32px); padding: .7rem; display: grid; gap: .35rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 18px 40px rgba(0, 0, 0, .28); }
+.contas-pop[hidden] { display: none; }
+.contas-pop-tit { margin: 0 0 .15rem; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.contas-pop-acoes { display: grid; gap: .35rem; margin-top: .3rem; padding-top: .55rem; border-top: 1px solid var(--border); }
+.contas-pop-acoes .btn { justify-content: flex-start; width: 100%; }
+.conta-op { display: flex; align-items: center; gap: .25rem; border-radius: 11px; }
+.conta-op-entrar { flex: 1; min-width: 0; display: flex; align-items: center; gap: .6rem; padding: .45rem .5rem; border: 1px solid transparent; border-radius: 11px;
+  background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.conta-op-entrar:not(:disabled):hover { background: var(--surface-2); border-color: var(--border); }
+.conta-op-entrar:disabled { cursor: default; }
+.conta-op.atual .conta-op-entrar { background: var(--accent-soft); }
+.conta-op-txt { display: grid; min-width: 0; }
+.conta-op-txt b { font-size: .9rem; }
+.conta-op-txt small { color: var(--muted); font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conta-op-ok { margin-left: auto; color: var(--accent); display: grid; }
+.conta-op-tirar { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.conta-op-tirar:hover { background: color-mix(in srgb, var(--neg) 14%, transparent); color: var(--neg); }
+.conta-op-tirar svg { width: 15px; height: 15px; }
+.contas-lista { display: grid; gap: .3rem; margin: .7rem 0; max-width: 460px; }
+.acoes-linha { display: flex; flex-wrap: wrap; gap: .5rem; }
+.login-contas { display: grid; gap: .35rem; }
+.login-contas .sub { margin: 0 0 .2rem; }
+.login-ou { display: flex; align-items: center; gap: .6rem; margin: .5rem 0 0; color: var(--muted); font-size: .8rem; }
+.login-ou::before, .login-ou::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+/* Saldo atual: linhas de receita/despesa com imagem e clicáveis */
+a.sp-linha { color: inherit; text-decoration: none; grid-template-columns: 44px 1fr auto; transition: transform .12s, box-shadow .12s; }
+a.sp-linha:hover { transform: translateY(-1px); box-shadow: 0 0 0 1px var(--border); }
+.sp-linha .sp-icone { width: 44px; height: 44px; padding: 6px; }
+.vazio-cartao { display: grid; justify-items: start; gap: .6rem; }
+.vazio-cartao .sub { margin: 0; }
+@media (max-width: 420px) {
+  .topo-conta { padding-right: .45rem; gap: .3rem; }
+  .topo-conta-nome { display: none; }
+  .topo .marca > span { white-space: nowrap; }
+}
+.lateral-pe .avatar, .conta-op .avatar, .topo-conta .avatar { font-size: .78rem; letter-spacing: .02em; }

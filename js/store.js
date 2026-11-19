@@ -10,7 +10,7 @@
 //     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
 //     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261119195141';
+import { uid } from './util.js?v=20261119200134';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
@@ -86,6 +86,10 @@ function localStore() {
     async signUp() { return user; },
     async resetPassword() {},
     async signOut() {},
+    contasSalvas() { return []; },
+    async trocarConta() { throw new Error('Disponível só no site com login.'); },
+    async adicionarConta() { throw new Error('Disponível só no site com login.'); },
+    esquecerConta() {},
     async load() { const db = read(); write(db); return db; },
 
     async savePerfil(p) { return upsert('perfis', p); },
@@ -183,6 +187,26 @@ async function supabaseStore(cfg) {
     if (error) throw new Error(error.message);
     return data;
   };
+
+  // ---- Contas salvas neste aparelho (para trocar de conta sem digitar a senha de novo).
+  // Guarda a mesma "chave de sessão" que o Supabase já guarda no navegador para a conta aberta,
+  // sempre a mais nova (o Supabase troca a chave de tempos em tempos e a antiga deixa de valer).
+  const CONTAS_KEY = 'financas-contas-salvas';
+  const lerContas = () => {
+    try { const v = JSON.parse(localStorage.getItem(CONTAS_KEY) || '[]'); return Array.isArray(v) ? v : []; } catch { return []; }
+  };
+  const gravarContas = (lista) => {
+    try { localStorage.setItem(CONTAS_KEY, JSON.stringify(lista)); } catch { /* sem armazenamento */ }
+  };
+  const lembrarSessao = (s) => {
+    if (!s?.user?.id || !s.refresh_token) return;
+    const lista = lerContas().filter((c) => c.id !== s.user.id);
+    lista.push({ id: s.user.id, email: s.user.email || '', access_token: s.access_token, refresh_token: s.refresh_token, usado: Date.now() });
+    gravarContas(lista);
+  };
+  const esquecerSessao = (id) => gravarContas(lerContas().filter((c) => c.id !== id));
+  sb.auth.onAuthStateChange((_ev, session) => { if (session) lembrarSessao(session); });
+
   const PERFIL_COLS = 'id, nome, tipo, cor, ordem';
   const CAT_COLS = 'id, perfil_id, nome, tipo, ordem, ativo, banco, estilo, titular, subtipo, saldo_inicial, saldo_desde, limite, dia_fechamento, dia_vencimento';
   const CLASSE_COLS = 'id, perfil_id, nome, cor, ordem, ativo, escopo_padrao, tipo, pai_id';
@@ -239,7 +263,42 @@ async function supabaseStore(cfg) {
     async resetPassword(email) {
       check(await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname }));
     },
-    async signOut() { await sb.auth.signOut(); },
+    // Sai só deste aparelho (não derruba a conta aberta no celular, por exemplo) e tira da lista de contas salvas
+    async signOut() {
+      const { data } = await sb.auth.getSession();
+      if (data.session?.user) esquecerSessao(data.session.user.id);
+      await sb.auth.signOut({ scope: 'local' });
+    },
+
+    /** Contas que já entraram neste aparelho: [{id, email}] (a aberta agora incluída). */
+    contasSalvas() {
+      return lerContas().sort((a, b) => a.email.localeCompare(b.email)).map(({ id, email }) => ({ id, email }));
+    },
+    /** Abre outra conta salva, sem senha. */
+    async trocarConta(id) {
+      const c = lerContas().find((x) => x.id === id);
+      if (!c) throw new Error('Esta conta não está mais salva neste aparelho. Entre com o e-mail e a senha.');
+      // a conta aberta agora fica salva com a chave mais nova antes de trocar
+      const { data } = await sb.auth.getSession();
+      if (data.session) lembrarSessao(data.session);
+      const { data: r, error } = await sb.auth.setSession({ access_token: c.access_token, refresh_token: c.refresh_token });
+      if (error || !r.session) {
+        esquecerSessao(id);
+        throw new Error('O acesso salvo desta conta expirou. Entre de novo com o e-mail e a senha.');
+      }
+      return r.session.user;
+    },
+    /** Deixa a conta atual salva e libera a tela de login, para entrar em outra (o app recarrega a página em seguida).
+     *  Não usa signOut: ele invalida a sessão no servidor e a conta salva deixaria de abrir. */
+    async adicionarConta() {
+      const { data } = await sb.auth.getSession();
+      if (data.session) lembrarSessao(data.session);
+      sb.auth.stopAutoRefresh?.();
+      const chave = sb.auth.storageKey || `sb-${new URL(cfg.SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
+      try { localStorage.removeItem(chave); } catch { /* sem armazenamento */ }
+    },
+    /** Tira uma conta da lista deste aparelho (não apaga nada da conta). */
+    esquecerConta(id) { esquecerSessao(id); },
 
     // Acesso liberado (conta autorizada ou e-mail convidado).
     // O projeto Supabase é dividido com outro app, por isso essa trava extra.

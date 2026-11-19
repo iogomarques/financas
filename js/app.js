@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261119195141';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261119195141';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261119195141';
-import { lerPlanilha } from './importer.js?v=20261119195141';
-import { lerExtrato, normDesc } from './extrato.js?v=20261119195141';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261119195141';
-import { ILUSTRA } from './ilustra.js?v=20261119195141';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261119200134';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261119200134';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261119200134';
+import { lerPlanilha } from './importer.js?v=20261119200134';
+import { lerExtrato, normDesc } from './extrato.js?v=20261119200134';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261119200134';
+import { ILUSTRA } from './ilustra.js?v=20261119200134';
 
 const app = document.getElementById('app');
 const S = {
@@ -581,21 +581,143 @@ function shell(r) {
       ${marca}
       <nav class="nav" aria-label="Menu">${menu}</nav>
       ${seletorTema()}
-      <div class="lateral-pe">
-        <span class="avatar">${esc((email[0] || '?').toUpperCase())}</span>
-        <div><b>${esc(email.split('@')[0] || 'Conta')}</b><small>${S.store.mode === 'local' ? 'modo local' : esc(email)}</small></div>
+      <div class="contas-ancora">
+        <button type="button" class="lateral-pe" data-a="contas-menu" aria-haspopup="true" aria-expanded="false" title="Trocar de conta">
+          <span class="avatar">${esc(iniciais(email))}</span>
+          <div><b>${esc(nomeConta(email))}</b><small>${S.store.mode === 'local' ? 'modo local' : 'Trocar de conta'}</small></div>
+          <i class="pe-trocar">${ICON.trocar}</i>
+        </button>
+        ${menuContas('cima')}
       </div>
     </aside>
     <div class="conteudo">
-      <header class="topo">${marca}</header>
+      <header class="topo">${marca}
+        <div class="contas-ancora so-celular">
+          <button type="button" class="topo-conta" data-a="contas-menu" aria-haspopup="true" aria-expanded="false" title="Trocar de conta">
+            <span class="avatar">${esc(iniciais(email))}</span><span class="topo-conta-nome">${esc(nomeConta(email))}</span>${ICON.trocar}
+          </button>
+          ${menuContas('baixo')}
+        </div>
+      </header>
       ${S.store.mode === 'local' ? '<div class="aviso">Modo local: os dados ficam só neste navegador.</div>' : ''}
       <main></main>
     </div>
   </div>`;
 }
 
+/* ===================================================== trocar de conta */
+// "iogo.marques" → "Iogo Marques": nome curto a partir do e-mail
+function nomeConta(email) {
+  const base = String(email || '').split('@')[0].replace(/\d+$/, '').replace(/[._-]+/g, ' ').trim();
+  if (!base) return 'Conta';
+  return base.split(' ').map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+}
+// Duas letras no círculo ("Iogo Marques" → "IM", "ivonei" → "IV"): contas com a mesma inicial ficam diferentes
+function iniciais(email) {
+  const partes = nomeConta(email).split(' ').filter(Boolean);
+  const txt = partes.length > 1 ? partes[0][0] + partes[1][0] : (partes[0] || '?').slice(0, 2);
+  return txt.toUpperCase();
+}
+
+function contasOutras() {
+  return (S.store?.contasSalvas?.() || []).filter((c) => c.id !== S.user?.id);
+}
+
+/** Lista de contas salvas (usada no menu, no login e em Ajustes). */
+function listaContas(contas, comAtual) {
+  const atual = comAtual && S.user ? [{ id: S.user.id, email: S.user.email || '', atual: true }] : [];
+  return [...atual, ...contas].map((c) => `<div class="conta-op ${c.atual ? 'atual' : ''}">
+      <button type="button" class="conta-op-entrar" ${c.atual ? 'disabled' : `data-trocar="${c.id}"`} title="${c.atual ? 'Conta aberta agora' : `Entrar como ${esc(c.email)}`}">
+        <span class="avatar">${esc(iniciais(c.email))}</span>
+        <span class="conta-op-txt"><b>${esc(nomeConta(c.email))}</b><small>${esc(c.email)}</small></span>
+        ${c.atual ? `<i class="conta-op-ok" aria-label="aberta agora">${ICON.check}</i>` : ''}
+      </button>
+      ${c.atual ? '' : `<button type="button" class="conta-op-tirar" data-esquecer="${c.id}" title="Tirar esta conta da lista deste aparelho" aria-label="Tirar da lista">${ICON.fechar}</button>`}
+    </div>`).join('');
+}
+
+function menuContas(lado) {
+  if (S.store?.mode !== 'supabase') return '';
+  return `<div class="contas-pop ${lado}" role="menu" hidden>
+    <p class="contas-pop-tit">Contas neste aparelho</p>
+    ${listaContas(contasOutras(), true)}
+    <div class="contas-pop-acoes">
+      <button type="button" class="btn" data-a="add-conta">${ICON.mais}<span>Entrar em outra conta</span></button>
+      <button type="button" class="btn perigo" data-a="sair-conta">${ICON.sair}<span>Sair desta conta</span></button>
+    </div>
+  </div>`;
+}
+
+async function trocarPara(id) {
+  try {
+    await S.store.trocarConta(id);
+    // recomeça do Resumo: endereços com contas/cartões da conta anterior não existem na nova
+    history.replaceState(null, '', location.pathname + location.search + '#/mes');
+    location.reload();
+  } catch (e) { toast(e.message, 'erro'); render(); }
+}
+
+function voltarAoLogin() {
+  S.user = null;
+  S.data = dadosVazios();
+  S.perfilId = null;
+  S.autorizado = undefined;
+  history.replaceState(null, '', location.pathname + location.search);
+  render();
+}
+
+/** Liga os botões de troca de conta dentro de `raiz` (menu, login ou Ajustes). */
+function bindContas(raiz) {
+  raiz.querySelectorAll('[data-trocar]').forEach((b) => b.addEventListener('click', () => trocarPara(b.dataset.trocar)));
+  raiz.querySelectorAll('[data-esquecer]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    S.store.esquecerConta(b.dataset.esquecer);
+    b.closest('.conta-op')?.remove();
+    toast('Conta tirada da lista deste aparelho.');
+  }));
+  raiz.querySelectorAll('[data-a="add-conta"]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      await S.store.adicionarConta();
+      history.replaceState(null, '', location.pathname + location.search);
+      location.reload(); // abre na tela de login
+    } catch (e) { toast(e.message, 'erro'); }
+  }));
+  raiz.querySelectorAll('[data-a="sair-conta"]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Sair desta conta neste aparelho? Para voltar será preciso digitar a senha.')) return;
+    await S.store.signOut();
+    voltarAoLogin();
+  }));
+}
+
+function fecharMenusConta() {
+  document.querySelectorAll('.contas-pop').forEach((p) => { p.hidden = true; });
+  document.querySelectorAll('[data-a="contas-menu"]').forEach((b) => b.setAttribute('aria-expanded', 'false'));
+}
+
 function bindShell(r) {
   app.querySelectorAll('[data-tema]').forEach((b) => b.addEventListener('click', () => definirTema(b.dataset.tema)));
+  // Menu de contas (rodapé do menu lateral no computador, canto do topo no celular)
+  app.querySelectorAll('[data-a="contas-menu"]').forEach((b) => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const pop = b.parentElement.querySelector('.contas-pop');
+    if (!pop) return;
+    const abrir = pop.hidden;
+    fecharMenusConta();
+    if (!abrir) return;
+    // posição fixa junto do botão (o menu lateral tem rolagem e cortaria o quadro)
+    const r = b.getBoundingClientRect();
+    Object.assign(pop.style, pop.classList.contains('cima')
+      ? { left: `${Math.max(8, r.left)}px`, bottom: `${window.innerHeight - r.top + 8}px`, top: 'auto', right: 'auto' }
+      : { right: `${Math.max(8, window.innerWidth - r.right)}px`, top: `${r.bottom + 8}px`, left: 'auto', bottom: 'auto' });
+    pop.hidden = false;
+    b.setAttribute('aria-expanded', 'true');
+    pop.querySelector('button:not(:disabled)')?.focus();
+  }));
+  app.querySelectorAll('.contas-pop').forEach((p) => {
+    p.addEventListener('click', (e) => e.stopPropagation());
+    p.addEventListener('keydown', (e) => { if (e.key === 'Escape') fecharMenusConta(); });
+    bindContas(p);
+  });
   // Recolher / abrir o menu lateral (fica lembrado neste navegador)
   app.querySelector('.lateral [data-a="menu-compacto"]')?.addEventListener('click', () => {
     const lay = app.querySelector('.layout');
@@ -628,6 +750,7 @@ function bindShell(r) {
 }
 // Clique fora fecha o seletor de mês (um único ouvinte para o site todo)
 document.addEventListener('click', () => {
+  fecharMenusConta();
   const pop = document.querySelector('.seletor-mes .popover');
   if (pop && !pop.hidden) {
     pop.hidden = true;
@@ -642,6 +765,11 @@ function renderLogin(modo = 'entrar') {
   <div class="login">
     <form class="card login-card">
       <div class="marca grande"><img src="icons/icon.svg?v=mqs" alt="" width="56" height="56"><span>Finanças Marques</span></div>
+      ${modo === 'entrar' && contasOutras().length ? `<div class="login-contas">
+        <p class="sub">Entrar com uma conta já usada neste aparelho:</p>
+        ${listaContas(contasOutras(), false)}
+        <p class="login-ou"><span>ou digite o e-mail e a senha</span></p>
+      </div>` : ''}
       <h1>${titulo}</h1>
       <label>E-mail<input type="email" name="email" autocomplete="email" required></label>
       ${modo !== 'senha' ? `<label>Senha<input type="password" name="senha" autocomplete="${modo === 'criar' ? 'new-password' : 'current-password'}" minlength="6" required></label>` : ''}
@@ -654,6 +782,7 @@ function renderLogin(modo = 'entrar') {
     </form>
   </div>`;
   app.querySelectorAll('[data-m]').forEach((a) => a.addEventListener('click', (e) => { e.preventDefault(); renderLogin(a.dataset.m); }));
+  bindContas(app);
   const form = app.querySelector('form');
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1946,9 +2075,9 @@ function renderResumo(main, ano, mes) {
       <section class="card saldo-card">
         ${tituloCard(ehMesAtual ? 'Saldo atual' : `Saldo no fim de ${MESES[mes - 1].toLowerCase()}`, 'Soma do dinheiro nas suas contas.', 'carteira')}
         <div class="saldo-pilha">
-          <div class="sp-linha entrada"><span class="sp-icone">↓</span><span>Receitas do mês</span><b>${fmtBRL(t.receitas)}</b></div>
+          <a class="sp-linha entrada" href="#/lancamentos/${ano}/${mes}/receitas" title="Ver as receitas"><span class="sp-icone">${ILUSTRA.entrou}</span><span>Receitas do mês</span><b>${fmtBRL(t.receitas)}</b></a>
           <div class="sp-saldo"><strong class="${cls(t.saldo)}">${grande(t.saldo)}</strong></div>
-          <div class="sp-linha saida"><span class="sp-icone">↑</span><span>Despesas do mês</span><b>${fmtBRL(t.despesas)}</b></div>
+          <a class="sp-linha saida" href="#/lancamentos/${ano}/${mes}/despesas" title="Ver as despesas"><span class="sp-icone">${ILUSTRA.saiu}</span><span>Despesas do mês</span><b>${fmtBRL(t.despesas)}</b></a>
         </div>
         ${semSaldoInicial.length && contas.length ? `<p class="hint aviso-txt">Falta o saldo inicial de ${semSaldoInicial.length === 1 ? 'uma conta' : `${semSaldoInicial.length} contas`}. <a href="#/contas/${ano}/${mes}">Definir →</a></p>` : ''}
       </section>
@@ -1996,7 +2125,8 @@ function renderResumo(main, ano, mes) {
                 <td>${lim ? fmtBRL(lim.disponivel) : c.limite ? fmtBRL(Number(c.limite) - (fat ?? 0)) : '—'}</td></tr>`;
             }).join('')}</tbody>
             <tfoot><tr><th>Total</th><td></td><td>${fmtBRL(cartoes.reduce((s, c) => s + (valorFatura(c, ano, mes, l) ?? 0), 0))}</td><td></td></tr></tfoot>
-          </table></div>` : '<p class="sub">Nenhum cartão cadastrado.</p>'}
+          </table></div>` : `<div class="vazio-cartao"><p class="sub">Esta conta ainda não tem nenhum cartão de crédito cadastrado.</p>
+            <a class="btn primario" href="#/ajustes">${ICON.cartao}<span>Cadastrar um cartão</span></a></div>`}
         </section>
       </div>
 
@@ -4218,7 +4348,16 @@ function renderAjustes(main) {
       </div>
     </section>
 
-    ${S.store.mode === 'supabase' ? '<section class="card"><h2>Conta</h2><button class="btn perigo" data-a="sair">Sair</button></section>' : ''}`;
+    ${S.store.mode === 'supabase' ? `<section class="card" id="conta-acesso">
+      <h2>Conta</h2>
+      <p class="sub">Você está na conta <b>${esc(S.user?.email || '')}</b>. As outras contas que já entraram neste aparelho aparecem abaixo: um clique troca de conta, sem digitar a senha.</p>
+      <div class="contas-lista">${listaContas(contasOutras(), true)}</div>
+      <div class="acoes-linha">
+        <button type="button" class="btn" data-a="add-conta">${ICON.mais}<span>Entrar em outra conta</span></button>
+        <button type="button" class="btn perigo" data-a="sair-conta">${ICON.sair}<span>Sair desta conta</span></button>
+      </div>
+      <p class="hint">A lista fica salva só neste aparelho. Num celular ou computador de outra pessoa, use <b>Sair desta conta</b>.</p>
+    </section>` : ''}`;
 
   // --- contas e cartões
   main.querySelectorAll('.cat[data-id]').forEach((row) => {
@@ -4438,13 +4577,8 @@ function renderAjustes(main) {
     e.target.value = '';
   });
 
-  main.querySelector('[data-a="sair"]')?.addEventListener('click', async () => {
-    await S.store.signOut();
-    S.user = null;
-    S.data = dadosVazios();
-    S.perfilId = null;
-    render();
-  });
+  const contaSec = main.querySelector('#conta-acesso');
+  if (contaSec) bindContas(contaSec);
 }
 
 async function importar(lido) {
@@ -4495,6 +4629,10 @@ const ICON = {
   lista: svg('<path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>'),
   upload: svg('<path d="M12 15V3M7 8l5-5 5 5"/><path d="M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>'),
   ajuda: svg('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6"/><path d="M12 17h.01"/>'),
+  trocar: svg('<path d="M17 3l4 4-4 4"/><path d="M21 7H9"/><path d="M7 21l-4-4 4-4"/><path d="M3 17h12"/>'),
+  sair: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/>'),
+  check: svg('<path d="M20 6 9 17l-5-5"/>'),
+  fechar: svg('<path d="M18 6 6 18M6 6l12 12"/>'),
 };
 
 boot();
