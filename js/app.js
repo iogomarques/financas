@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261118110127';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261118110127';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261118110127';
-import { lerPlanilha } from './importer.js?v=20261118110127';
-import { lerExtrato, normDesc } from './extrato.js?v=20261118110127';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261118110127';
-import { ILUSTRA } from './ilustra.js?v=20261118110127';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261119195141';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261119195141';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261119195141';
+import { lerPlanilha } from './importer.js?v=20261119195141';
+import { lerExtrato, normDesc } from './extrato.js?v=20261119195141';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261119195141';
+import { ILUSTRA } from './ilustra.js?v=20261119195141';
 
 const app = document.getElementById('app');
 const S = {
@@ -1956,10 +1956,10 @@ function renderResumo(main, ano, mes) {
       <section class="visao-geral">
         <h2 class="secao">Visão geral</h2>
         <div class="vg-grade">
-          <div class="card vg"><span class="vg-icone azul">${ICON.banco}</span><div><strong>${fmtBRL(t.saldo)}</strong><span>Saldo nas contas</span>${chipVariacao(t.saldo, tAnt.saldo)}</div></div>
-          <div class="card vg"><span class="vg-icone verde">+</span><div><strong class="pos">${fmtBRL(t.receitas)}</strong><span>Total recebido</span>${chipVariacao(t.receitas, tAnt.receitas)}</div></div>
-          <div class="card vg"><span class="vg-icone vermelho">−</span><div><strong class="neg">${fmtBRL(t.despesas)}</strong><span>Total gasto</span>${chipVariacao(t.despesas, tAnt.despesas, true)}</div></div>
-          <div class="card vg"><span class="vg-icone amarelo">⇅</span><div><strong class="${cls(t.balanco)}">${fmtBRL(t.balanco)}</strong><span>Balanço (recebido − gasto)</span>${chipVariacao(t.balanco, tAnt.balanco)}</div></div>
+          <a class="card vg" href="#/contas/${ano}/${mes}" title="Ver as contas"><span class="vg-icone azul">${ILUSTRA.banco}</span><div><strong>${fmtBRL(t.saldo)}</strong><span>Saldo nas contas</span>${chipVariacao(t.saldo, tAnt.saldo)}</div><i class="vg-seta" aria-hidden="true">›</i></a>
+          <a class="card vg" href="#/lancamentos/${ano}/${mes}/receitas" title="Ver as receitas"><span class="vg-icone verde">${ILUSTRA.entrou}</span><div><strong class="pos">${fmtBRL(t.receitas)}</strong><span>Total recebido</span>${chipVariacao(t.receitas, tAnt.receitas)}</div><i class="vg-seta" aria-hidden="true">›</i></a>
+          <a class="card vg" href="#/lancamentos/${ano}/${mes}/despesas" title="Ver as despesas"><span class="vg-icone vermelho">${ILUSTRA.saiu}</span><div><strong class="neg">${fmtBRL(t.despesas)}</strong><span>Total gasto</span>${chipVariacao(t.despesas, tAnt.despesas, true)}</div><i class="vg-seta" aria-hidden="true">›</i></a>
+          <a class="card vg" href="#/graficos/${ano}/${mes}" title="Ver os gráficos"><span class="vg-icone amarelo">${ILUSTRA.balanco}</span><div><strong class="${cls(t.balanco)}">${fmtBRL(t.balanco)}</strong><span>Balanço (recebido − gasto)</span>${chipVariacao(t.balanco, tAnt.balanco)}</div><i class="vg-seta" aria-hidden="true">›</i></a>
         </div>
       </section>
     </div>
@@ -3919,106 +3919,92 @@ const GLOSSARIO = [
 ];
 
 function renderAjuda(main) {
+  const controle = ehControle();
+  const { ano, mes } = mesPadrao();
+  const sm = `/${ano}/${mes}`;
+  // Telas: cada quadro leva direto para a tela
+  const telas = [
+    [`#/mes${sm}`, ICON.mes, controle ? 'Resumo' : 'Visão do mês', controle ? 'Saldo, o que entrou e saiu no mês, contas e cartões de uma vez.' : 'Quanto sobrou, para onde foi o dinheiro e cada cartão no mês.', true],
+    [`#/contas${sm}`, ICON.banco, 'Contas', 'Saldo de cada conta. Clique numa conta para ver o extrato dela.', controle],
+    [`#/lancamentos${sm}`, ICON.lista, 'Transações', 'Despesas, receitas, transferências e o extrato do mês. Aqui se importa o PDF/OFX do banco.', controle],
+    [`#/cartoes${sm}`, ICON.cartao, 'Cartões de crédito', 'Fatura que vence no mês, limite livre, parcelas terminando.', true],
+    [`#/classificar${sm}`, ICON.classificar, 'Classificar', 'Dê categoria aos gastos novos com um clique; o site aprende para os próximos meses.', controle],
+    [`#/graficos${sm}`, ICON.grafico, 'Gráficos', 'Receitas × despesas, por categoria, débito × crédito, pessoal × empresa.', true],
+    [`#/calendario${sm}`, ICON.calendario, 'Calendário', 'O mês dia a dia: quando entrou, quando saiu e quando vence cada fatura.', controle],
+    [`#/ano/${ano}`, ICON.ano, 'Ano', 'O ano inteiro em resumo ou como a planilha do Excel (um mês por linha).', true],
+    ['#/geral', ICON.geral, 'Todos os anos', 'Soma de todos os anos, com filtro por período e por cartão.', true],
+    ['#/ajustes', ICON.ajustes, 'Ajustes', 'Contas e cartões, categorias, regras, metas, tema e backup.', true],
+  ].filter((t) => t[4]);
+
+  const rotina = controle
+    ? `<ol class="passos curtos">
+        <li>Baixe no banco o <b>PDF</b> (ou OFX) do mês de cada conta e a <b>fatura</b> de cada cartão.</li>
+        <li><b>Transações → Importar extrato</b>: um arquivo por vez, escolhendo a conta. O site confere os saldos e não repete nada.</li>
+        <li><b>Classificar</b>: um clique por grupo de gastos parecidos. Do 2º mês em diante quase tudo já vem classificado.</li>
+        <li>Pronto: veja o <b>Resumo</b> e os <b>Gráficos</b>.</li>
+      </ol>`
+    : `<ol class="passos curtos">
+        <li>Abra a <b>Visão do mês</b> no mês que terminou e toque em <b>Lançar / Editar mês</b>.</li>
+        <li>Preencha a <b>receita</b>, o <b>débito</b> e a <b>fatura de cada cartão</b>.</li>
+        <li>Preencha <b>investimento</b> e <b>rendimento</b>, se houver.</li>
+        <li>No mês novo, lance o <b>saldo do dia 1º</b>: isso fecha o mês anterior.</li>
+      </ol>
+      <p class="hint">Dá para digitar contas: <code>=1598,40-38,90</code>.</p>`;
+
   main.innerHTML = `
     ${cabecalhoSimples('Ajuda')}
 
-    <div class="ajuda-grid">
+    <section class="card">
+      ${tituloCard('Para que serve cada tela', 'Clique num quadro para abrir a tela.', 'livro')}
+      <div class="telas-grade">
+        ${telas.map(([href, icone, nome, texto]) => `<a class="tela-item" href="${href}"><span class="tela-ic">${icone}</span><span><b>${nome}</b><small>${texto}</small></span></a>`).join('')}
+      </div>
+    </section>
+
+    <div class="ajuda-3">
       <section class="card">
-        <h2>Rotina de cada mês (5 minutos)</h2>
-        <ol class="passos">
-          <li><b>No início do mês</b>, abra a tela <b>Mês</b> e vá para o mês que terminou (setas ‹ ›).</li>
-          <li>Toque em <b>Lançar</b> (ou <b>Editar mês</b>) e preencha a <b>receita</b> do mês.</li>
-          <li>Preencha os gastos: o total do <b>débito</b> e a <b>fatura de cada cartão</b>.</li>
-          <li>Preencha o <b>investimento</b> e o <b>rendimento / outras entradas</b>, se houver.</li>
-          <li>Lance também o mês novo só com o <b>saldo inicial</b> (quanto há na conta + investimentos no dia 1º). Isso fecha o saldo final do mês anterior.</li>
-          <li>Pronto: confira a <b>sobra</b> e os alertas na tela Mês.</li>
-        </ol>
-        <p class="hint">Dá para digitar contas nos campos: <code>=1598,40-38,90</code> ou <code>=120+80,50</code>. O site guarda a conta e mostra o resultado.</p>
+        ${tituloCard('Rotina de cada mês', '5 minutos', 'calendario')}
+        ${rotina}
       </section>
-
       <section class="card">
-        <h2>Para que serve cada tela</h2>
-        <dl class="lista telas">
-          <div><dt>${ICON.mes} Mês</dt><dd>O resumo de um mês: quanto sobrou, para onde foi o dinheiro, cada cartão e a comparação com o mês anterior. É a tela do dia a dia.</dd></div>
-          ${ehControle() ? `<div><dt>${ICON.lista} Transações</dt><dd>Abas Despesas, Receitas, Transferências (de uma conta para outra) e Extrato (tudo do mês, dia a dia). Também é onde se importa o extrato do banco.</dd></div>
-          <div><dt>${ICON.calendario} Calendário</dt><dd>O mês em forma de calendário: receitas em verde, despesas na conta em vermelho, compras no cartão em azul, transferências em amarelo e os dias de fechamento/vencimento da fatura. Toque num dia para ver o que aconteceu.</dd></div>
-          <div><dt>${ICON.classificar} Classificar</dt><dd>Os gastos sem categoria, agrupados por descrição. Um clique na categoria classifica o grupo e cria a regra para os próximos meses.</dd></div>
-          <div><dt>${ICON.grafico} Gráficos</dt><dd>Receitas e despesas mês a mês, pessoal × empresa, saldo das contas e, em <b>Por categoria</b>, quanto foi para cada categoria de gasto (Funcionários, Assinaturas…) e de onde veio cada receita (Vendas, Salário…). Toque numa categoria para ver as subcategorias e cada transação. <b>Classificar</b> é só onde se dá a categoria às transações novas.</dd></div>
-          <div><dt>${ICON.cartao} Cartões</dt><dd>A fatura que vence no mês (pelas datas de fechamento e vencimento de cada cartão), se já foi paga e quanto do limite ainda está livre.</dd></div>` : ''}
-          <div><dt>${ICON.ano} Ano · Resumo</dt><dd>O ano inteiro: total que entrou e saiu, divisão por cartão/categoria, melhores e piores meses, investimentos e evolução do saldo.</dd></div>
-          <div><dt>${ICON.ano} Ano · Planilha</dt><dd>Igual à aba do ano no Excel: um mês por linha e as informações gerais ao lado. Toque num mês para editar.</dd></div>
-          <div><dt>${ICON.geral} Todos os anos</dt><dd>Soma de todos os anos, com filtro por período e por cartão/categoria.</dd></div>
-          <div><dt>${ICON.ajustes} Ajustes</dt><dd>Cartões e categorias, metas (15%/6×/70%), importar a planilha do Excel e backup.</dd></div>
-        </dl>
-      </section>
-
-      ${ehControle() ? `<section class="card largo destaque-acao">
-        <h2>Rotina com extratos (todo dia 1º)</h2>
-        <ol class="passos">
-          <li>No app/site de cada banco, baixe o extrato do mês que terminou em <b>OFX</b> (ou CSV): conta da empresa, cartão da empresa, conta pessoal, cartão pessoal…</li>
-          <li>Em <b>Transações → Importar extrato</b>, importe <b>um arquivo por vez</b>, escolhendo de qual conta/cartão ele é.
-            O site já marca como <b>Transferência</b> (não conta) o pagamento da fatura, o dinheiro entre as suas contas e os nomes cadastrados em Ajustes.</li>
-          <li><b>Cartão de crédito:</b> se o extrato da conta trouxer só o pagamento da fatura, importe também o extrato/fatura do cartão
-            (as compras de verdade). Se não tiver, a Conferência oferece contar o pagamento como um gasto "Fatura do cartão".</li>
-          <li>Abra <b>Classificar</b>. Primeiro, a <b>Conferência</b> mostra o que parece errado (transferência contada como receita,
-            fatura contada duas vezes, repetidos) — corrija com um clique. Depois, os gastos parecidos vêm juntos (ex.: todos os Pix para o mesmo funcionário):
-            clique na categoria e deixe "Lembrar" marcado para os próximos meses virem classificados sozinhos.</li>
-          <li>Se um gasto da empresa saiu da conta pessoal (ou o contrário), troque o lado para <b>Empresa</b>/<b>Pessoal</b> antes de clicar.</li>
-          <li>Veja o resultado em <b>Gráficos → Por categoria</b> (quanto foi para cada coisa) e na <b>Visão do mês</b>.</li>
-        </ol>
-        <p class="hint">No primeiro mês dá mais trabalho (criar as regras). Do segundo em diante, a maior parte já chega classificada.</p>
-      </section>
-
-      <section class="card">
-        <h2>Lançamentos e extratos (sem repetir nada)</h2>
-        <p class="sub">Há duas formas de lançar — use a que for mais prática:</p>
-        <ol class="passos">
-          <li><b>Só o total do mês</b>, na tela Mês (como na planilha).</li>
-          <li><b>Gasto por gasto</b>, na tela Transações: à mão (ex.: toda semana) ou <b>importando o extrato</b> do banco/cartão (PDF do extrato ou da fatura, OFX ou CSV).</li>
-        </ol>
-        <p class="sub">Como o site evita contar duas vezes:</p>
-        <ul class="passos">
-          <li>Quando um campo do mês tem lançamentos, o valor do mês é <b>a soma deles</b> e o campo fica travado na tela Mês.</li>
-          <li>Ao importar, cada movimentação do banco tem uma identidade. <b>Importar o mesmo extrato de novo, ou um que repete dias, pula o que já entrou.</b></li>
-          <li>Ao lançar à mão algo com mesma data, valor e descrição de um lançamento existente, o site <b>avisa antes de salvar</b>.</li>
-          <li>Na importação, o que parece repetido de um lançamento manual vem <b>desmarcado</b> para você conferir.</li>
-          <li>Pagamento da fatura do cartão e dinheiro entre as suas contas entram como <b>Transferência</b> (não contam como gasto nem receita).</li>
-        </ul>
-      </section>` : ''}
-
-      <section class="card">
-        <h2>Configurar uma conta nova</h2>
-        <ol class="passos">
-          <li>A pessoa cria a conta em <b>Criar conta</b> e confirma pelo e-mail. Antes, o administrador libera o e-mail dela em <b>Ajustes → Acesso de outras pessoas</b>.</li>
-          <li>Em <b>Ajustes → Cartões e categorias</b>, cadastre o que a pessoa usa. Exemplos:
-            <ul>
-              <li><b>Crédito:</b> um item para cada cartão ("Cartão pessoal", "Cartão empresa").</li>
-              <li><b>Débito:</b> "Débito pessoal" e, para empresa, "Funcionários", "Fornecedores", "Impostos"...</li>
-            </ul>
-            Pessoal e empresa ficam juntos; use nomes que deixem claro de onde é cada gasto.</li>
-          <li>Ajuste as <b>metas</b> (15% investir, 6× reserva, 70% máximo de gasto) se precisar.</li>
-          <li>Se a pessoa já tem a planilha do Excel, use <b>Importar planilha</b>. Senão, lance os meses pela tela <b>Mês</b>.</li>
-        </ol>
-      </section>
-
-      <section class="card">
-        <h2>Dicas</h2>
-        <ul class="passos">
-          <li><b>Celular e iPad:</b> abra o site no navegador → Compartilhar → <b>Adicionar à Tela de Início</b>. Fica como um app.</li>
-          <li><b>Mês em branco</b> não entra nas médias. Lance só o que já fechou.</li>
-          <li><b>Cartão que deixou de usar:</b> em Ajustes use <b>Arquivar</b>. O histórico continua contando.</li>
-          <li><b>Backup:</b> em Ajustes → Baixar backup, de vez em quando.</li>
-          <li>Os dados ficam salvos na nuvem: o que você lança no computador aparece no celular.</li>
+        ${tituloCard('Dicas', '', 'ideia')}
+        <ul class="passos curtos">
+          <li><b>Celular:</b> no navegador, <b>Adicionar à Tela de Início</b>. Vira um app.</li>
+          <li><b>Mês em branco</b> não entra nas médias.</li>
+          <li><b>Cartão que deixou de usar:</b> Ajustes → <b>Arquivar</b>.</li>
+          <li><b>Backup</b> de vez em quando em Ajustes.</li>
+          <li>Os dados ficam na nuvem: o que você lança no computador aparece no celular.</li>
         </ul>
       </section>
+      <section class="card">
+        ${tituloCard('Configurar uma conta nova', '', 'engrenagem')}
+        <ol class="passos curtos">
+          <li>O administrador libera o e-mail em <b>Ajustes → Acesso de outras pessoas</b>.</li>
+          <li>A pessoa entra em <b>Criar conta</b> e confirma pelo e-mail.</li>
+          <li>Em <b>Ajustes</b>, cadastre as contas e cartões e escolha o modo de uso.</li>
+          <li>Tem a planilha do Excel? Use <b>Importar planilha</b>.</li>
+        </ol>
+      </section>
+    </div>
 
-      <section class="card largo">
-        <h2>O que significa cada número</h2>
+    <section class="card ajuda-mais">
+      ${controle ? `<details>
+        <summary>Como o site evita contar duas vezes</summary>
+        <ul class="passos">
+          <li>Cada movimentação importada tem uma identidade (data + valor + descrição + conta). <b>Importar de novo, ou em outro formato (PDF e OFX), pula o que já entrou.</b></li>
+          <li>O que parece repetido de um lançamento manual vem <b>desmarcado</b> para você conferir.</li>
+          <li>Pagamento da fatura e dinheiro entre as suas contas entram como <b>Transferência</b> (não contam como gasto nem receita).</li>
+          <li>Quando um campo do mês tem lançamentos, o valor do mês é <b>a soma deles</b>.</li>
+        </ul>
+      </details>` : ''}
+      <details>
+        <summary>O que significa cada número</summary>
         <dl class="glossario">
           ${GLOSSARIO.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}
         </dl>
-      </section>
-    </div>`;
+      </details>
+      <p class="hint creditos">Ilustrações 3D: Fluent Emoji, da Microsoft (licença MIT).</p>
+    </section>`;
 }
 
 /* ============================================================ ajustes */
