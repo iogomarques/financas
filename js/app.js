@@ -1,10 +1,10 @@
-import { createStore, PREFS_PADRAO } from './store.js?v=20261119200134';
-import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261119200134';
-import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261119200134';
-import { lerPlanilha } from './importer.js?v=20261119200134';
-import { lerExtrato, normDesc } from './extrato.js?v=20261119200134';
-import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261119200134';
-import { ILUSTRA } from './ilustra.js?v=20261119200134';
+import { createStore, PREFS_PADRAO } from './store.js?v=20261119200940';
+import { MESES, MESES_CURTO, indexMeses, linhaMes, linhasDoAno, estatisticas, anosComDados, mesTemDados, aplicarLancamentos } from './calc.js?v=20261119200940';
+import { fmtBRL, fmtNum, fmtPct, esc, parseExpr, toInputText, round2 } from './util.js?v=20261119200940';
+import { lerPlanilha } from './importer.js?v=20261119200940';
+import { lerExtrato, normDesc } from './extrato.js?v=20261119200940';
+import { CLASSES_SUGERIDAS, textoBase, regraPara, sugerir, regraPadrao, detectarTransferencia, palavrasChave, mesmaLoja } from './classes.js?v=20261119200940';
+import { ILUSTRA } from './ilustra.js?v=20261119200940';
 
 const app = document.getElementById('app');
 const S = {
@@ -492,6 +492,9 @@ async function boot() {
     return;
   }
   S.user = await S.store.getUser();
+  // Acabou de trocar de conta e a conta salva não abriu (acesso vencido): avisa e pede a senha
+  const trocaOk = S.store.conferirTroca(S.user);
+  if (!trocaOk) setTimeout(() => toast('O acesso salvo daquela conta expirou. Entre com o e-mail e a senha dela.', 'erro'), 400);
   S.store.onAuthChange(async (u) => {
     const mudou = (u?.id || null) !== (S.user?.id || null);
     S.user = u;

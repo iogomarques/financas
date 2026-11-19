@@ -10,7 +10,7 @@
 //     meses:       [{perfil_id, ano, mes, receita, investimento, rendimento, saldo_inicial, despesas, formulas, observacao}],
 //     lancamentos: [{id, perfil_id, data, descricao, valor, destino, categoria_id, classe_id, escopo, origem, conta, chave}],
 //     prefs:       { [perfil_id]: {pct_investir, meses_reserva, pct_max_gasto} } }
-import { uid } from './util.js?v=20261119200134';
+import { uid } from './util.js?v=20261119200940';
 
 const SUPABASE_JS = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/+esm';
 
@@ -89,6 +89,7 @@ function localStore() {
     contasSalvas() { return []; },
     async trocarConta() { throw new Error('Disponível só no site com login.'); },
     async adicionarConta() { throw new Error('Disponível só no site com login.'); },
+    conferirTroca() { return true; },
     esquecerConta() {},
     async load() { const db = read(); write(db); return db; },
 
@@ -201,10 +202,14 @@ async function supabaseStore(cfg) {
   const lembrarSessao = (s) => {
     if (!s?.user?.id || !s.refresh_token) return;
     const lista = lerContas().filter((c) => c.id !== s.user.id);
-    lista.push({ id: s.user.id, email: s.user.email || '', access_token: s.access_token, refresh_token: s.refresh_token, usado: Date.now() });
+    const sessao = { access_token: s.access_token, refresh_token: s.refresh_token, expires_at: s.expires_at, expires_in: s.expires_in, token_type: s.token_type || 'bearer', user: s.user };
+    lista.push({ id: s.user.id, email: s.user.email || '', sessao, usado: Date.now() });
     gravarContas(lista);
   };
   const esquecerSessao = (id) => gravarContas(lerContas().filter((c) => c.id !== id));
+  // Onde o Supabase guarda a sessão aberta neste navegador
+  const chaveSessao = () => sb.auth.storageKey || `sb-${new URL(cfg.SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
+  // Função síncrona de propósito: o Supabase espera estas funções terminarem antes de seguir
   sb.auth.onAuthStateChange((_ev, session) => { if (session) lembrarSessao(session); });
 
   const PERFIL_COLS = 'id, nome, tipo, cor, ordem';
@@ -252,7 +257,9 @@ async function supabaseStore(cfg) {
       return data.session?.user || null;
     },
     onAuthChange(cb) {
-      sb.auth.onAuthStateChange((_ev, session) => cb(session?.user || null));
+      // Roda o aviso do app "depois": se o app carregasse os dados dentro desta função, o Supabase
+      // ficaria esperando o app e o app esperando o Supabase (a tela travava).
+      sb.auth.onAuthStateChange((_ev, session) => { setTimeout(() => cb(session?.user || null), 0); });
     },
     async signIn(email, password) {
       return check(await sb.auth.signInWithPassword({ email, password })).user;
@@ -274,19 +281,29 @@ async function supabaseStore(cfg) {
     contasSalvas() {
       return lerContas().sort((a, b) => a.email.localeCompare(b.email)).map(({ id, email }) => ({ id, email }));
     },
-    /** Abre outra conta salva, sem senha. */
+    /** Deixa a sessão da conta escolhida pronta para abrir; o app recarrega a página em seguida.
+     *  Não usa setSession: ele trava esperando o app (ver onAuthChange). Ao recarregar, o próprio
+     *  Supabase lê a sessão guardada e, se a chave tiver vencido, pega uma nova sozinho. */
     async trocarConta(id) {
       const c = lerContas().find((x) => x.id === id);
       if (!c) throw new Error('Esta conta não está mais salva neste aparelho. Entre com o e-mail e a senha.');
       // a conta aberta agora fica salva com a chave mais nova antes de trocar
       const { data } = await sb.auth.getSession();
       if (data.session) lembrarSessao(data.session);
-      const { data: r, error } = await sb.auth.setSession({ access_token: c.access_token, refresh_token: c.refresh_token });
-      if (error || !r.session) {
-        esquecerSessao(id);
-        throw new Error('O acesso salvo desta conta expirou. Entre de novo com o e-mail e a senha.');
-      }
-      return r.session.user;
+      sb.auth.stopAutoRefresh?.();
+      // contas salvas pela versão anterior só têm as chaves: expires_at 0 faz o Supabase renovar ao abrir
+      const sessao = c.sessao || { access_token: c.access_token, refresh_token: c.refresh_token, expires_at: 0, expires_in: 0, token_type: 'bearer', user: { id: c.id, email: c.email } };
+      localStorage.setItem(chaveSessao(), JSON.stringify(sessao));
+      try { sessionStorage.setItem('financas-trocando', id); } catch { /* sem armazenamento */ }
+    },
+    /** Depois de recarregar: confere se a troca deu certo. Se não, tira a conta da lista e devolve false. */
+    conferirTroca(user) {
+      let alvo = null;
+      try { alvo = sessionStorage.getItem('financas-trocando'); sessionStorage.removeItem('financas-trocando'); } catch { /* sem armazenamento */ }
+      if (!alvo) return true;
+      if (user?.id === alvo) return true;
+      esquecerSessao(alvo);
+      return false;
     },
     /** Deixa a conta atual salva e libera a tela de login, para entrar em outra (o app recarrega a página em seguida).
      *  Não usa signOut: ele invalida a sessão no servidor e a conta salva deixaria de abrir. */
@@ -294,8 +311,7 @@ async function supabaseStore(cfg) {
       const { data } = await sb.auth.getSession();
       if (data.session) lembrarSessao(data.session);
       sb.auth.stopAutoRefresh?.();
-      const chave = sb.auth.storageKey || `sb-${new URL(cfg.SUPABASE_URL).hostname.split('.')[0]}-auth-token`;
-      try { localStorage.removeItem(chave); } catch { /* sem armazenamento */ }
+      try { localStorage.removeItem(chaveSessao()); } catch { /* sem armazenamento */ }
     },
     /** Tira uma conta da lista deste aparelho (não apaga nada da conta). */
     esquecerConta(id) { esquecerSessao(id); },
